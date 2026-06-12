@@ -259,3 +259,30 @@ hardware.
 
 These are plausible future requirements, not requirements for writing the first
 working code.
+
+## Run the MVP
+
+The root Compose application starts the recorded driver, mock mono processor,
+and HTTPS WebXR client. Copy `.env.example` to `.env`, set absolute paths to a
+seekable video and valid PLY file, then run:
+
+```bash
+docker compose up --build
+```
+
+Open `https://localhost:8443` from the PCVR browser (or use the WSL address),
+accept the development certificate, and select the recorded robot. The raw path
+connects the browser directly to the driver. The processed path asks the
+processor to connect directly to the driver and sends the mounted PLY back to
+the browser. Ports 8001 and 8002 also listen on the WSL host to help diagnose direct
+WebRTC connectivity.
+
+For component development and tests:
+
+```bash
+cd client && npm install && npm test && npm run build
+python -m pip install -r drivers/mock-robot/requirements.txt pytest
+(cd drivers/mock-robot && pytest)
+python -m pip install -r processors/mock-mono/requirements.txt pytest
+(cd processors/mock-mono && pytest)
+```

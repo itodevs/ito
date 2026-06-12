@@ -1,0 +1,2 @@
+import test from 'node:test'; import assert from 'node:assert/strict'; import {processorMatches} from '../src/protocol.js';
+test('matches basic video descriptor fields', () => { const driver = {video:{kind:'mono',encoding:'vp8'}}; assert.equal(processorMatches(driver,{accepts:{kind:'mono',encoding:'vp8'},scene:{format:'ply'}}), true); assert.equal(processorMatches(driver,{accepts:{kind:'stereo',encoding:'vp8'},scene:{format:'ply'}}), false); });

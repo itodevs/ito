@@ -1,9 +1,3 @@
-[submodule "client"]
-	path = client
-	url = https://github.com/itodevs/client.git
-[submodule "drivers/mock-robot"]
-	path = drivers/mock-robot
-	url = https://github.com/itodevs/mock-robot.git
 [submodule "drivers/ito-droid"]
 	path = drivers/ito-droid
 	url = https://github.com/itodevs/ito-droid.git
