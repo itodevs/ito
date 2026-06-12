@@ -1,277 +1,286 @@
-# Ito MVP Implementation Plan
+# Ito First-Version Implementation Prompt
 
-## Summary
+## Goal
 
-Create the smallest complete Ito vertical slice:
+Build the smallest working Ito vertical slice described by `README.md` and
+`client/README.md`.
 
-- A vanilla-JavaScript Three.js/Spark WebXR client.
-- A mock robot driver that loops a mounted video file and logs received
-  headset/controller poses.
-- A mock mono processor that genuinely subscribes to the driver video, consumes
-  frames without processing them, and streams a mounted PLY splat scene.
-- Real REST, session, capability, Protobuf, and direct WebRTC interfaces that
-  future implementations can retain unchanged.
+A user must be able to enter WebXR, select a recorded robot driver, choose raw
+video or a mock visual processor, see useful output, and send safely watched
+headset/controller poses to the driver.
 
-The required target is PCVR on Windows through Virtual Desktop, using a
-standalone headset as the PCVR headset. Docker Engine, Docker Compose, the
-repository, and development commands run inside WSL2.
-Raw video client rendering, real reconstruction, real robots, discovery, direct
-Pico-browser access, LAN access, TLS, STUN, and TURN are out of scope.
+This first-version implementation is experimental. Ito's purpose is not. Build
+the smallest useful proof of Ito's immersive robot-piloting experience, and
+optimize its code for learning and ease of change rather than API stability or
+hypothetical future deployments.
 
-## Repository Structure
+Preserve only the central architectural decisions:
 
-Remove the obsolete `server` submodule and `.gitmodules` entry after preserving
-its uncommitted local diff for reference.
+- there is no central Ito server;
+- live data uses direct WebRTC connections;
+- raw view connects the driver directly to the client;
+- processed view connects the driver directly to the processor and the
+  processor directly to the client;
+- the driver owns the final 500 ms control watchdog.
+
+## Repository Boundaries
+
+Work with the existing repository:
 
 ```text
-client/
-  src/
-  Dockerfile
-  nginx.conf.template
+README.md
+mvp.md
+client/                    WebXR client submodule
 drivers/
-  mock/
-    app/
-    Dockerfile
-    pyproject.toml
-processors/
-  mock/
-    app/
-    Dockerfile
-    pyproject.toml
-packages/
-  python/ito_service/
-protocol/
-  openapi.yaml
-  ito.proto
-  generate.sh
-docs/
-  mvp.md
-compose.yaml
-.env.example
+  mock-robot/              recorded/mock robot-driver submodule
+  ito-droid/               physical robot concepts and reference material
+processors/                visual processor implementations
 ```
 
-- Each client, driver, and processor remains an independently buildable
-  container.
-- Use root Docker Compose with Linux host networking for all MVP containers.
-  Because Docker Engine runs inside WSL, containers share the WSL network
-  namespace. This makes Nginx's `127.0.0.1` upstreams valid and avoids an extra
-  Docker bridge/NAT layer for WebRTC.
-- Bind-mount user-supplied assets:
-  - `VIDEO_FILE` to `/assets/camera.mp4`
-  - `SPLAT_FILE` to `/assets/scene.ply`
-- Nginx serves the built client at `http://localhost:8080`.
-- Nginx proxies REST and WebRTC signaling only:
-  - `/api/drivers/mock/` to `127.0.0.1:8001`
-  - `/api/processors/mock/` to `127.0.0.1:8002`
-- RTP and DataChannel traffic travels directly between WebRTC peers.
+- Implement the client in `client/`.
+- Implement the recorded driver in `drivers/mock-robot/`.
+- Add the mock processor under `processors/mock-mono/`.
+- Keep each component independently buildable.
+- Add root `compose.yaml` and `.env.example` for the local demo.
+- Do not modify `drivers/ito-droid/` or control physical hardware.
+- Do not create a central server, shared service framework, generated protocol
+  package, or speculative abstraction layer.
+
+## Minimal Protocol
+
+For the first implementation, a WebRTC peer connection is the session. When it
+closes, release its resources.
+
+Each driver and processor exposes:
+
+```text
+GET  /
+POST /webrtc
+```
+
+`GET /` returns an informal JSON descriptor containing only fields currently
+used by the client, such as:
+
+```json
+{
+  "name": "Recorded robot",
+  "type": "robot-driver",
+  "modes": ["control", "raw-video"],
+  "video": {
+    "kind": "mono",
+    "encoding": "vp8"
+  }
+}
+```
+
+`POST /webrtc` accepts a purpose/configuration object and SDP offer, then returns
+an SDP answer. Use one-shot signaling after ICE gathering.
+
+After connection:
+
+- video uses WebRTC media tracks;
+- all other messages use DataChannels;
+- control/status/configuration/error messages are JSON;
+- those messages use `control` and `status` channels;
+- operator poses use a `control` channel;
+- processor output uses a reliable ordered `scene` channel and may be binary.
+
+Do not implement:
+
+- REST session resources, status endpoints, deletion, leases, or renewal;
+- OpenAPI or Protobuf;
+- formal protocol versions or stable error-code catalogs;
+- authentication or authorization;
+- a general capability/compatibility system;
+- reconnect orchestration or a persistent scene synchronization protocol.
+
+The recorded driver has only one video source, so the processor only needs its
+`/webrtc` URL and the `video-source` purpose. Do not add source tokens yet.
 
 ## Technologies
 
-- Client: vanilla JavaScript, Vite, Three.js, `@sparkjsdev/spark`, Protobuf.js.
-- Services: Python 3.12, FastAPI, Pydantic, aiortc, PyAV, protobuf.
-- Static hosting/control proxy: Nginx.
-- REST contract: `protocol/openapi.yaml`.
-- WebRTC message contract: `protocol/ito.proto`.
-- Generate JavaScript and Python Protobuf bindings during builds.
-- Pin dependency versions in lockfiles.
+- Client: vanilla JavaScript, Vite, Three.js, `@sparkjsdev/spark`.
+- Services: Python 3.12, FastAPI, aiortc, PyAV.
+- Local client hosting and optional same-origin signaling proxy: Nginx.
+- Local orchestration: Docker Compose.
 
-## REST Interface
+Pin direct dependencies, but do not spend time building shared packaging or
+code-generation infrastructure.
 
-Every service implements:
+## Local Deployment
 
-```text
-GET    /healthz
-GET    /.well-known/ito-service
-GET    /v1/capabilities
-POST   /v1/sessions
-GET    /v1/sessions/{session_id}
-POST   /v1/sessions/{session_id}/renew
-DELETE /v1/sessions/{session_id}
-POST   /v1/sessions/{session_id}/webrtc
-```
+The required target is a Windows PCVR browser through Virtual Desktop, with the
+services and development commands running in WSL2.
 
-The mock driver additionally exposes the `VideoSource.subscribe_url` endpoint
-used by the processor to submit a WebRTC offer.
+Bind-mount:
 
-Rules:
+- `VIDEO_FILE` into the recorded driver;
+- `SPLAT_FILE` into the mock processor.
 
-- Browser-facing URLs returned by services are relative to the configured
-  service base URL.
-- Processor-facing `VideoSource.subscribe_url` is an absolute internal URL.
-- Browser-to-service signaling uses one-shot SDP exchange after ICE gathering
-  completes.
-- Processor-to-driver signaling uses the same offer/answer schema.
-- Trickle ICE is not implemented; capabilities explicitly advertise this.
-- Sessions expire after 30 seconds and are renewed every 10 seconds.
-- Nginx injects a static development bearer token into browser REST requests.
-- `VideoSource` uses a random, opaque, one-use token that expires after 60
-  seconds and records its intended processor service ID.
+First prove that the Windows browser can establish WebRTC media and DataChannel
+connections to services in WSL2. Log ICE candidates and selected candidate
+pairs while diagnosing that path.
 
-## WebRTC Protocol
+Use the simplest local hosting setup that lets the target browser enter WebXR.
+Production HTTPS, CORS, STUN, TURN, LAN access, and public hosting are out of
+scope unless one becomes necessary to make this local path work.
 
-Use Protobuf messages wrapped in a common envelope containing:
+Nginx may proxy HTTP signaling. It must not proxy RTP or DataChannel traffic.
 
-```text
-protocol_version
-session_id
-sequence
-payload
-```
+## Recorded Robot Driver
 
-Coordinate conventions:
+Implement in `drivers/mock-robot/`.
 
-- Right-handed coordinates.
-- Meters.
-- Positive Y is up.
-- Negative Z is forward.
-- Quaternion order is `x, y, z, w`.
-- A transform describes the child pose in the parent frame.
+- Probe and loop one mounted seekable video with
+  `MediaPlayer(..., loop=True)`.
+- Offer a browser-compatible mono WebRTC video track.
+- Use `MediaRelay` so raw view and the processor can subscribe concurrently.
+- Return a small descriptor from `GET /`.
+- Accept client and video-source offers through `POST /webrtc`.
+- Create `control` and `status` DataChannels for the client connection.
+- Send simple video-source connection information over `status` when requested.
+- Receive operator pose messages at about 30 Hz and log accepted commands.
+- Ignore stale or out-of-order control messages.
+- Require explicit enable before treating poses as active commands.
+- Perform and log `safe_stop` when:
+  - an enabled update has not arrived for 500 ms;
+  - the client sends disabled/stop;
+  - the client peer connection closes.
+- Send a stop acknowledgement over `status`.
+- Log enough connection, frame, command, and watchdog information to debug the
+  demo.
 
-Driver/client channels:
-
-| Channel | Configuration | Messages |
-|---|---|---|
-| `control` | unordered, `maxRetransmits=0` | operator poses and enable state |
-| `telemetry` | unordered, `maxRetransmits=1` | robot transforms and state |
-| `events` | reliable, ordered | ownership, errors, stop acknowledgements |
-
-Processor/client channels:
-
-| Channel | Configuration | Messages |
-|---|---|---|
-| `scene` | reliable, unordered | scene chunk fragments |
-| `tracking` | unordered, `maxRetransmits=1` | tracking and camera transforms |
-| `events` | reliable, ordered | manifest, acknowledgements, resync, errors |
-
-Required Protobuf payloads:
-
-- `TrackedPose`, `OperatorPoseFrame`, `Transform`, `TelemetryFrame`
-- `ServiceEvent`, `TrackingUpdate`
-- `SceneManifest`, `SceneChunkFragment`, `SceneChunkAck`, `ResyncRequest`
-
-`OperatorPoseFrame` contains required head pose and optional left/right
-controller poses.
-
-Scene chunks use stable IDs and versions. Fragment payloads are at most 48 KiB
-and include map epoch, chunk ID, version, fragment index/count, PLY format, total
-size, and SHA-256. The client reassembles and verifies the chunk before rendering
-it.
-
-## Mock Robot Driver
-
-- Probe and loop the mounted seekable video using `MediaPlayer(..., loop=True)`.
-- Advertise one calibrated mono profile using negotiated VP8 WebRTC output.
-- Derive width, height, and frame rate from the file.
-- Publish deterministic mock pinhole calibration.
-- Issue a destination-bound `VideoSource` when the client creates a session.
-- Answer the processor's recv-only WebRTC offer with the video track.
-- Use `MediaRelay` so the interface supports multiple future subscribers.
-- Accept client control/events/telemetry channels.
-- Publish fixed mock transforms at 10 Hz:
-  - `robot_base -> robot_head`
-  - `robot_head -> camera_left`
-- Receive operator poses at 30 Hz and log structured pose information to stdout.
-- Implement a 500 ms enabled-command watchdog.
-- On timeout, disabled command, disconnect, or session expiry, log `safe_stop`
-  and emit a stop acknowledgement.
+Do not address physical servos or depend on `drivers/ito-droid/`.
 
 ## Mock Mono Processor
 
-- Advertise acceptance of calibrated mono VP8/H264 input and Gaussian PLY
-  output.
-- On session creation, use the supplied `VideoSource` token to establish a direct
-  recv-only WebRTC connection to the driver.
-- Continuously call `recv()` on the incoming video track and count frames.
-- Ignore frame pixels, but mark the session degraded if input stalls.
-- Become ready only after receiving the first video frame.
-- Read the mounted PLY once at startup, validate it exists, and compute its
-  SHA-256.
-- Publish:
-  - one map epoch;
-  - one scene manifest;
-  - one versioned scene chunk containing the fragmented PLY;
-  - fixed `map -> camera_left` tracking updates at 10 Hz.
-- Place the chunk two meters in front of the initial camera.
-- Replay the manifest and chunk when the client sends `ResyncRequest`.
+Implement under `processors/mock-mono/`.
+
+- Return a small descriptor from `GET /` stating that it accepts the recorded
+  driver's mono video and outputs a PLY scene.
+- Accept the client offer through `POST /webrtc`.
+- Receive the driver's video-source connection information over `status`.
+- Establish a direct recv-only WebRTC connection to the driver.
+- Continuously consume video frames and count them.
+- Report ready only after receiving the first frame.
+- Report stale/degraded when frames stop.
+- Read and validate the mounted PLY at startup.
+- Send a small JSON header and then the PLY over `scene` as sequential binary
+  chunks small enough for DataChannel messages.
+- On a simple resend request, send the whole PLY again.
+- Log enough frame, scene-transfer, and connection information to debug the
+  demo.
+
+Do not implement reconstruction, changing scenes, manifests, revisions,
+acknowledgements, or persistent resynchronization.
 
 ## Client
 
-- Build a real WebXR client with no framework, A-Frame, or TypeScript.
-- Display the browser-required minimal `Enter Ito` button immediately.
-- Fetch hardcoded service capabilities concurrently while waiting for the user
-  gesture.
-- Once inside WebXR:
-  - show reachable robot drivers as blocks;
-  - select blocks through controller-tip collision;
-  - show compatible processor blocks after driver selection;
-  - support one mock driver and processor while keeping rendering data-driven.
-- Use controller grip positions with a small visible touch sphere and contact
-  debounce.
-- Hide or disable unhealthy/incompatible blocks with CanvasTexture status
-  labels.
-- Create the driver session, pass its `VideoSource` to the processor, then
-  connect directly to both services.
-- Send headset plus available left/right controller poses at 30 Hz.
-- Show immersive Enable and Stop blocks.
-- Stop sending enabled commands on XR exit, service failure, or tracking
-  failure.
-- Reassemble and verify scene fragments.
-- Render the PLY using
-  `new SplatMesh({ fileBytes, fileName: "scene.ply" })`.
-- Replace chunks by stable ID/version and send acknowledgements.
-- Display basic driver, processor, input-frame, tracking, scene, and control
-  status.
+Implement in `client/` and follow `client/README.md`.
 
-Raw-video rendering is intentionally excluded from this MVP.
+- Build a real WebXR client with no frontend framework or TypeScript.
+- Display `Enter Ito` immediately.
+- Load hardcoded driver and processor URLs.
+- Fetch their `GET /` descriptors while waiting for the user gesture.
+- Show reachable drivers as tappable physical blocks.
+- After driver selection, show raw view and the mock processor when their basic
+  video descriptor fields match.
+- Use visible controller-tip touch spheres and contact debounce.
+- In raw mode:
+  - connect only to the driver;
+  - render its direct video track;
+  - show stale-video state.
+- In processed mode:
+  - connect to the driver and processor;
+  - request video-source connection information from the driver;
+  - pass it to the processor;
+  - render the PLY received from the processor with Spark.
+- Reassemble sequential scene chunks. Request the complete scene again if
+  transfer fails.
+- Sample and send headset plus available controller poses at about 30 Hz.
+- Show simple immersive Enable and Stop controls.
+- Stop sending enabled commands on Stop, XR exit, lost focus, lost tracking,
+  driver disconnect, or client error.
+- Show connection state, visual freshness, enabled state, and latest
+  stop acknowledgement.
 
-## Test Plan
+Keep the render loop independent from WebRTC callbacks. Do not build a general
+session manager, health system, compatibility engine, or reconnect framework.
 
-Automated tests:
+## JSON Message Guidance
 
-- Validate service responses against `openapi.yaml`.
-- Cross-language Protobuf golden-message tests between Python and JavaScript.
-- Capability compatibility tests.
-- Session create, renew, expiry, deletion, and invalid-state tests.
-- `VideoSource` expiry, one-use, and destination-ID tests.
-- Driver video subscription integration test proving frames are delivered.
-- Processor integration test proving it receives and consumes frames.
-- Scene fragmentation, out-of-order reassembly, SHA-256, version replacement,
-  acknowledgement, and resync tests.
-- Control sequence rejection and 500 ms watchdog tests.
-- Docker Compose health and endpoint smoke tests.
+Use direct, readable JSON objects for control and status. Add a `type` field and
+only the data needed by the current sender and receiver. Scene bytes may remain
+binary.
 
-Manual PCVR acceptance:
+Example control message:
 
-1. Set `VIDEO_FILE` and `SPLAT_FILE`, then run `docker compose up --build`.
-2. On Windows, start Virtual Desktop and its PCVR runtime, then open
-   `http://localhost:8080` in the PCVR-capable Windows browser.
-3. Select `Enter Ito` and enter the immersive WebXR session through Virtual
-   Desktop.
-4. Tap the mock robot-driver block.
-5. Tap the mock mono-processor block.
-6. Confirm the processor reports received video frames.
-7. Confirm the mounted PLY appears through Spark.
-8. Move the headset and controllers; confirm poses appear in mock-driver logs.
-9. Enable, stop, and exit WebXR; confirm stop acknowledgements and `safe_stop`.
-10. Trigger a scene resync and confirm the PLY is restored.
+```json
+{
+  "type": "control",
+  "sequence": 42,
+  "sentAtMs": 123456.7,
+  "enabled": true,
+  "head": {
+    "position": [0, 1.7, 0],
+    "rotation": [0, 0, 0, 1]
+  }
+}
+```
 
-## Assumptions
+Use right-handed coordinates, meters, positive Y up, negative Z forward, and
+quaternion order `x, y, z, w`.
 
-- Windows 11 workstation with Virtual Desktop, a standalone headset, and a
-  PCVR-capable Windows Chromium browser.
-- Docker Engine and the Docker Compose plugin run directly inside WSL2;
-  development files live in the WSL filesystem. Docker Desktop is not required.
-- The Windows browser uses `http://localhost:8080`; browsers treat localhost as a
-  WebXR secure context.
-- The first implementation task is a networking spike proving that the Windows
-  browser can establish direct WebRTC connections to both aiortc service
-  containers. Inspect the resulting ICE candidates and connection path between
-  Windows and WSL; do not assume WSL localhost forwarding also handles WebRTC.
-- No TLS, CORS, STUN, TURN, LAN headset, or public hosting support in this MVP.
-- The mounted video contains one seekable video stream.
-- The mounted PLY is Spark-compatible, centered near its origin, and small enough
-  for interactive loading.
-- The mock processor proves the permanent processor interface but performs no
-  reconstruction.
-- Development bearer authentication is not production security; the REST and
-  capability-token interfaces remain stable when real authentication is added.
+Do not create a shared schema package yet. Keep sender and receiver fixtures in
+their component tests so message changes remain easy.
+
+## Tests
+
+Write tests for behavior that can break the first demo:
+
+- each service descriptor and WebRTC signaling endpoint;
+- driver video delivery to a raw-view peer;
+- driver video delivery to the processor;
+- processor frame consumption and ready/stale state;
+- PLY splitting, reassembly, and whole-file resend;
+- control sequence rejection, enable requirement, and 500 ms watchdog;
+- safe stop and acknowledgement on disabled command and disconnect;
+- basic client descriptor matching;
+- root Compose startup smoke test.
+
+Do not build contract-validation suites, cross-language golden schemas, lease
+tests, security suites, or exhaustive recovery tests before those features
+exist.
+
+## Manual Acceptance
+
+1. Initialize submodules, set `VIDEO_FILE` and `SPLAT_FILE`, and start the root
+   Compose application.
+2. Open the client in the Windows PCVR browser and enter WebXR.
+3. Select the recorded driver and raw view; confirm direct live video.
+4. Return to setup, select the recorded driver and mock processor, and confirm
+   the processor logs incoming frames.
+5. Confirm the mounted PLY appears through Spark.
+6. Move the headset/controllers and confirm accepted poses appear in driver
+   logs.
+7. Enable control, then stop; confirm the driver acknowledges
+   `safe_stop`.
+8. Enable again and close or interrupt the client connection; confirm the
+   driver's 500 ms watchdog performs `safe_stop`.
+9. Trigger a whole-scene resend and confirm the PLY appears again.
+
+## Completion Criteria
+
+The first version is complete when:
+
+- the three components run through root Compose;
+- raw and processed paths both use direct WebRTC connections;
+- no central service relays live data;
+- the client can render direct video and one processor-provided PLY;
+- the processor proves it consumes direct driver video;
+- operator poses reach the recorded driver;
+- missing enabled control updates reliably trigger `safe_stop`;
+- the manual PCVR workflow works over the measured Windows/WSL path;
+- the implementation remains small enough to change after what we learn.
+
+Everything else waits for evidence that it is needed.
