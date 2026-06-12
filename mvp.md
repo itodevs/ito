@@ -99,8 +99,8 @@ The recorded driver has only one video source, so the processor only needs its
 
 ## Technologies
 
-- Client: vanilla JavaScript, Vite, Three.js, `@sparkjsdev/spark`.
-- Services: Python 3.12, FastAPI, aiortc, PyAV.
+- Client: vanilla JavaScript, A-Frame, and `@sparkjsdev/spark`, served directly by Nginx.
+- Services: Python 3.14, FastAPI, aiortc, PyAV.
 - Local client hosting and optional same-origin signaling proxy: Nginx.
 - Local orchestration: Docker Compose.
 
@@ -109,16 +109,16 @@ code-generation infrastructure.
 
 ## Local Deployment
 
-The required target is a Windows PCVR browser through Virtual Desktop, with the
-services and development commands running in WSL2.
+The required target is a WebXR browser connecting to containerized services on
+the same Linux localhost.
 
 Bind-mount:
 
 - `VIDEO_FILE` into the recorded driver;
 - `SPLAT_FILE` into the mock processor.
 
-First prove that the Windows browser can establish WebRTC media and DataChannel
-connections to services in WSL2. Log ICE candidates and selected candidate
+First prove that the browser can establish WebRTC media and DataChannel
+connections to the local containerized services. Log ICE candidates and selected candidate
 pairs while diagnosing that path.
 
 Use the simplest local hosting setup that lets the target browser enter WebXR.
@@ -157,17 +157,17 @@ Do not address physical servos or depend on `drivers/ito-droid/`.
 Implement under `processors/mock-mono/`.
 
 - Return a small descriptor from `GET /` stating that it accepts the recorded
-  driver's mono video and outputs a PLY scene.
+  driver's mono video and outputs an incremental Gaussian-splat stream.
 - Accept the client offer through `POST /webrtc`.
 - Receive the driver's video-source connection information over `status`.
 - Establish a direct recv-only WebRTC connection to the driver.
 - Continuously consume video frames and count them.
 - Report ready only after receiving the first frame.
 - Report stale/degraded when frames stop.
-- Read and validate the mounted PLY at startup.
-- Send a small JSON header and then the PLY over `scene` as sequential binary
-  chunks small enough for DataChannel messages.
-- On a simple resend request, send the whole PLY again.
+- Read and validate the mounted Gaussian-splat PLY at startup.
+- Send a small JSON header and then stream the Gaussian-splat PLY over `scene` as
+  sequential binary chunks small enough for DataChannel messages.
+- On a simple resend request, restart the complete splat stream.
 - Log enough frame, scene-transfer, and connection information to debug the
   demo.
 
@@ -178,7 +178,7 @@ acknowledgements, or persistent resynchronization.
 
 Implement in `client/` and follow `client/README.md`.
 
-- Build a real WebXR client with no frontend framework or TypeScript.
+- Build a real WebXR client with A-Frame, vanilla JavaScript, and no TypeScript.
 - Display `Enter Ito` immediately.
 - Load hardcoded driver and processor URLs.
 - Fetch their `GET /` descriptors while waiting for the user gesture.
@@ -194,9 +194,9 @@ Implement in `client/` and follow `client/README.md`.
   - connect to the driver and processor;
   - request video-source connection information from the driver;
   - pass it to the processor;
-  - render the PLY received from the processor with Spark.
-- Reassemble sequential scene chunks. Request the complete scene again if
-  transfer fails.
+  - feed the incremental scene stream directly into Spark.
+- Feed sequential scene chunks into Spark through a `ReadableStream`. Request the
+  complete stream again if transfer fails.
 - Sample and send headset plus available controller poses at about 30 Hz.
 - Show simple immersive Enable and Stop controls.
 - Stop sending enabled commands on Stop, XR exit, lost focus, lost tracking,
@@ -231,43 +231,30 @@ Example control message:
 Use right-handed coordinates, meters, positive Y up, negative Z forward, and
 quaternion order `x, y, z, w`.
 
-Do not create a shared schema package yet. Keep sender and receiver fixtures in
-their component tests so message changes remain easy.
+Do not create a shared schema package yet; keep message shapes directly readable
+in their sending and receiving components while they remain easy to change.
 
-## Tests
+## Validation
 
-Write tests for behavior that can break the first demo:
-
-- each service descriptor and WebRTC signaling endpoint;
-- driver video delivery to a raw-view peer;
-- driver video delivery to the processor;
-- processor frame consumption and ready/stale state;
-- PLY splitting, reassembly, and whole-file resend;
-- control sequence rejection, enable requirement, and 500 ms watchdog;
-- safe stop and acknowledgement on disabled command and disconnect;
-- basic client descriptor matching;
-- root Compose startup smoke test.
-
-Do not build contract-validation suites, cross-language golden schemas, lease
-tests, security suites, or exhaustive recovery tests before those features
-exist.
+Do not add generated automated tests in the first implementation PR. Validate
+syntax, dependency resolution, Compose configuration, and the manual end-to-end
+workflow while the protocol and interaction model are still changing quickly.
 
 ## Manual Acceptance
 
-1. Initialize submodules, set `VIDEO_FILE` and `SPLAT_FILE`, and start the root
-   Compose application.
-2. Open the client in the Windows PCVR browser and enter WebXR.
+1. Set `VIDEO_FILE` and `SPLAT_FILE`, then start the root Compose application.
+2. Open the client in a localhost WebXR browser and enter WebXR.
 3. Select the recorded driver and raw view; confirm direct live video.
 4. Return to setup, select the recorded driver and mock processor, and confirm
    the processor logs incoming frames.
-5. Confirm the mounted PLY appears through Spark.
+5. Confirm the mounted Gaussian splats appear through Spark.
 6. Move the headset/controllers and confirm accepted poses appear in driver
    logs.
 7. Enable control, then stop; confirm the driver acknowledges
    `safe_stop`.
 8. Enable again and close or interrupt the client connection; confirm the
    driver's 500 ms watchdog performs `safe_stop`.
-9. Trigger a whole-scene resend and confirm the PLY appears again.
+9. Trigger a complete-stream resend and confirm the splats appear again.
 
 ## Completion Criteria
 
@@ -276,11 +263,11 @@ The first version is complete when:
 - the three components run through root Compose;
 - raw and processed paths both use direct WebRTC connections;
 - no central service relays live data;
-- the client can render direct video and one processor-provided PLY;
+- the client can render direct video and one processor-provided splat stream;
 - the processor proves it consumes direct driver video;
 - operator poses reach the recorded driver;
 - missing enabled control updates reliably trigger `safe_stop`;
-- the manual PCVR workflow works over the measured Windows/WSL path;
+- the manual WebXR workflow works over the measured localhost path;
 - the implementation remains small enough to change after what we learn.
 
 Everything else waits for evidence that it is needed.

@@ -1,5 +1,12 @@
 # Recorded robot driver
 
-Set `VIDEO_FILE` to a seekable video and run `uvicorn app.main:app --port 8001`.
-The service loops the file, relays it to every direct WebRTC subscriber, and
-owns the final 500 ms control watchdog.
+The recorded driver loops `VIDEO_FILE`, shares it through `MediaRelay`, and
+accepts direct WebRTC client-control and processor-video peers. It logs accepted
+WebXR poses and remains the final authority for disabled, disconnected, and
+500 ms watchdog stops.
+
+Run it through the root Compose application or set `VIDEO_FILE` and run:
+
+```bash
+uvicorn app.main:app --port 8001
+```

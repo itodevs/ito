@@ -159,9 +159,10 @@ The client creates one peer connection to the selected processor.
 | `scene` | processor to client | scene bytes, split into messages if needed |
 | `status` | both | configuration, readiness, errors, and simple resend request |
 
-The first processor sends one mounted PLY scene over a reliable ordered
+The first processor streams one mounted Gaussian-splat PLY over a reliable ordered
 DataChannel. It sends a small JSON header followed by sequential binary chunks
-because DataChannels have practical message-size limits. The client can request
+because DataChannels have practical message-size limits. Spark consumes those
+bytes directly as a stream without a second assembled client buffer. The client can request
 the complete scene again if assembly fails. Do not build a general revision,
 manifest, acknowledgement, or resynchronization protocol until a changing scene
 exists.
@@ -220,9 +221,9 @@ This repository documents the shared architecture and coordinates independently
 buildable implementations:
 
 ```text
-client/                    WebXR client submodule
+client/                    A-Frame WebXR client
 drivers/
-  mock-robot/              recorded/mock driver submodule
+  mock-robot/              recorded/mock driver
   ito-droid/               physical robot concepts and reference material
 processors/                visual processor implementations
 mvp.md                     first implementation prompt
@@ -234,13 +235,13 @@ hardware.
 
 ## First Implementation
 
-1. Prove a Windows WebXR browser can establish direct WebRTC connections to
-   services running in WSL2.
+1. Prove a localhost WebXR browser can establish direct WebRTC connections to
+   the containerized services.
 2. Implement the recorded driver and direct raw-video client view.
 3. Send headset/controller poses to the driver and prove the watchdog stops on
    missing updates.
-4. Implement the mock processor, direct driver-to-processor video, and one PLY
-   scene transfer to the client.
+4. Implement the mock processor, direct driver-to-processor video, and one incremental Gaussian-splat
+   stream to the client.
 5. Use what was learned to decide which message schemas and operational
    features deserve stable designs.
 
@@ -263,26 +264,15 @@ working code.
 ## Run the MVP
 
 The root Compose application starts the recorded driver, mock mono processor,
-and HTTPS WebXR client. Copy `.env.example` to `.env`, set absolute paths to a
-seekable video and valid PLY file, then run:
+and plain HTTP A-Frame client. Copy `.env.example` to `.env`, set absolute Linux
+paths to a seekable video and Gaussian-splat PLY, then run:
 
 ```bash
 docker compose up --build
 ```
 
-Open `https://localhost:8443` from the PCVR browser (or use the WSL address),
-accept the development certificate, and select the recorded robot. The raw path
-connects the browser directly to the driver. The processed path asks the
-processor to connect directly to the driver and sends the mounted PLY back to
-the browser. Ports 8001 and 8002 also listen on the WSL host to help diagnose direct
-WebRTC connectivity.
-
-For component development and tests:
-
-```bash
-cd client && npm install && npm test && npm run build
-python -m pip install -r drivers/mock-robot/requirements.txt pytest
-(cd drivers/mock-robot && pytest)
-python -m pip install -r processors/mock-mono/requirements.txt pytest
-(cd processors/mock-mono && pytest)
-```
+Open `http://localhost:8080`, select the recorded robot, and enter WebXR. The raw
+path connects the browser directly to the driver. The processed path asks the
+processor to consume driver video directly and incrementally streams the mounted
+Gaussian-splat PLY into SparkJS. The components use host networking so local ICE
+candidates and the processor-to-driver loopback URL remain directly reachable.

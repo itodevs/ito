@@ -1,1 +1,68 @@
-<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ito</title></head><body><main id="overlay"><h1>Ito</h1><p id="summary">Discovering direct connections…</p><button id="enter">Enter Ito</button><button id="exit" hidden>Exit session</button><pre id="status"></pre></main><script type="module" src="/src/main.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ito</title>
+    <link rel="stylesheet" href="/src/style.css">
+    <script src="https://aframe.io/releases/1.7.1/aframe.min.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+          "@sparkjsdev/spark": "https://sparkjs.dev/releases/spark/2.1.0/spark.module.js"
+        }
+      }
+    </script>
+    <script type="module" src="/src/main.js"></script>
+  </head>
+  <body>
+    <main id="overlay">
+      <h1>Ito</h1>
+      <p id="summary">Discovering direct connections…</p>
+      <button id="enter" type="button">Enter Ito</button>
+      <button id="exit" type="button" hidden>Exit session</button>
+      <pre id="status" aria-live="polite"></pre>
+    </main>
+
+    <video id="robot-video" autoplay muted playsinline></video>
+
+    <!-- A-Frame owns the WebXR scene, camera, controller tracking, and VR lifecycle. -->
+    <a-scene vr-mode-ui="enabled: false" renderer="antialias: true; colorManagement: true">
+      <a-sky color="#051014"></a-sky>
+      <a-circle position="0 0 0" rotation="-90 0 0" radius="4" color="#0a2828"></a-circle>
+      <a-entity light="type: hemisphere; color: #bfffee; groundColor: #182030; intensity: 2"></a-entity>
+
+      <a-entity id="rig">
+        <a-camera id="head" position="0 1.6 0"></a-camera>
+        <a-entity id="left-hand" hand-controls="hand: left">
+          <a-sphere class="touch-tip" position="0 0 -0.08" radius="0.025" color="#66ffd7"></a-sphere>
+        </a-entity>
+        <a-entity id="right-hand" hand-controls="hand: right">
+          <a-sphere class="touch-tip" position="0 0 -0.08" radius="0.025" color="#66ffd7"></a-sphere>
+        </a-entity>
+      </a-entity>
+
+      <!-- Setup and control blocks are declared in HTML so the immersive UI stays easy to edit. -->
+      <a-box id="driver-choice" class="ito-button setup-button" position="0 1.55 -1" width="0.7" height="0.3" depth="0.16" color="#278d78">
+        <a-text id="driver-label" value="Discovering driver" align="center" position="0 0 0.081" width="1.5"></a-text>
+      </a-box>
+      <a-box id="raw-choice" class="ito-button mode-button" visible="false" position="-0.45 1.55 -1" width="0.7" height="0.3" depth="0.16" color="#318fb5">
+        <a-text value="Raw view" align="center" position="0 0 0.081" width="1.5"></a-text>
+      </a-box>
+      <a-box id="processed-choice" class="ito-button mode-button" visible="false" position="0.45 1.55 -1" width="0.7" height="0.3" depth="0.16" color="#965ad1">
+        <a-text value="Gaussian splats" align="center" position="0 0 0.081" width="1.5"></a-text>
+      </a-box>
+      <a-box id="enable-control" class="ito-button control-button" visible="false" position="-0.35 1.2 -0.8" width="0.6" height="0.25" depth="0.14" color="#42d392">
+        <a-text value="ENABLE" align="center" position="0 0 0.071" width="1.3"></a-text>
+      </a-box>
+      <a-box id="stop-control" class="ito-button control-button" visible="false" position="0.35 1.2 -0.8" width="0.6" height="0.25" depth="0.14" color="#e35454">
+        <a-text value="STOP" align="center" position="0 0 0.071" width="1.3"></a-text>
+      </a-box>
+
+      <a-video id="raw-surface" src="#robot-video" visible="false" position="0 1.6 -2" width="3.2" height="1.8"></a-video>
+    </a-scene>
+
+  </body>
+</html>
