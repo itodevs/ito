@@ -488,10 +488,31 @@ document.querySelector('#enable-control').addEventListener('ito-touch', () => {
 });
 document.querySelector('#stop-control').addEventListener('ito-touch', () => stopControl('operator-stop'));
 
+// Disable the Layers path only for IWER, whose polyfilled session native bindings reject.
+function prepareWebXRRuntime() {
+  if (!window.CustomWebXRPolyfill || typeof window.XRWebGLBinding === 'undefined') {
+    return;
+  }
+
+  // Three.js r173+ selects XRWebGLBinding when present. IWER supplies a non-native
+  // XRSession, so Chrome's native binding rejects it before legacy XRWebGLLayer fallback.
+  const removed = delete window.XRWebGLBinding;
+  if (removed) {
+    log('Immersive Web Emulator detected; disabled unsupported WebXR Layers path');
+  } else {
+    console.warn('[Ito] Immersive Web Emulator detected, but XRWebGLBinding could not be disabled');
+  }
+}
+
 // Keep the browser-required user gesture obvious and available immediately.
 enter.addEventListener('click', async () => {
-  log('Enter Ito clicked', {isSecureContext, xrAvailable: Boolean(navigator.xr)});
+  log('Enter Ito clicked', {
+    isSecureContext,
+    xrAvailable: Boolean(navigator.xr),
+    emulated: Boolean(window.CustomWebXRPolyfill),
+  });
   try {
+    prepareWebXRRuntime();
     await scene.enterVR();
     showButtonGroup('setup');
   } catch (error) {
