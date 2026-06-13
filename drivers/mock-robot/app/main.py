@@ -111,6 +111,12 @@ async def webrtc(request: SignalRequest) -> dict:
     if not player or not player.video:
         raise HTTPException(503, f"video unavailable; mount VIDEO_FILE at {VIDEO_FILE}")
 
+    log.info(
+        "webrtc_offer purpose=%s receive_video=%s sdp_bytes=%d",
+        request.purpose,
+        request.configuration.get("receiveVideo", False),
+        len(request.offer.sdp),
+    )
     peer = RTCPeerConnection(RTCConfiguration(iceServers=[]))
     pcs.add(peer)
     state = ControlState() if request.purpose == "client" else None
@@ -162,4 +168,9 @@ async def webrtc(request: SignalRequest) -> dict:
         watchdog_tasks.add(task)
         task.add_done_callback(watchdog_tasks.discard)
 
+    log.info(
+        "webrtc_answer purpose=%s sdp_bytes=%d",
+        request.purpose,
+        len(peer.localDescription.sdp),
+    )
     return {"type": peer.localDescription.type, "sdp": peer.localDescription.sdp}

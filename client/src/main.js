@@ -1,9 +1,10 @@
 /*
  * Ito's browser client coordinates direct WebRTC connections while A-Frame
- * owns the WebXR scene and tracked controllers. Spark consumes each incoming
- * PLY byte chunk as a stream and renders its Gaussian splats in that scene.
+ * owns the WebXR scene and tracked controllers. Ordered PLY chunks are collected
+ * into the single completed buffer required by the A-Frame-compatible Spark release.
  */
 
+import AFRAME from 'aframe';
 import {SparkRenderer, SplatMesh} from '@sparkjsdev/spark';
 import {processorMatches, signal} from './protocol.js';
 
@@ -23,6 +24,7 @@ const state = {
   tracking: false,
   sceneTransfer: null,
   splatMesh: null,
+  sparkReady: false,
 };
 
 const summary = document.querySelector('#summary');
@@ -45,6 +47,22 @@ let sceneChannel;
 let controlTimer;
 let sparkRenderer;
 
+// Prefix browser diagnostics consistently so a copied console log is easy to follow.
+function log(message, details) {
+  if (details === undefined) {
+    console.info(`[Ito] ${message}`);
+  } else {
+    console.info(`[Ito] ${message}`, details);
+  }
+}
+
+// Report recoverable failures both in the console and in the visible status panel.
+function reportError(context, error) {
+  const message = error instanceof Error ? error.message : String(error);
+  state.connection = `${context}: ${message}`;
+  console.error(`[Ito] ${context}`, error);
+}
+
 // Fetch the small service descriptors while the user prepares to enter VR.
 async function discover() {
   const fetchDescriptor = async (url) => {
@@ -55,6 +73,7 @@ async function discover() {
     return response.json();
   };
 
+  log('discovering service descriptors', {driver: DRIVER_URL, processor: PROCESSOR_URL});
   const [driver, processor] = await Promise.allSettled([
     fetchDescriptor(DRIVER_URL),
     fetchDescriptor(PROCESSOR_URL),
@@ -65,6 +84,7 @@ async function discover() {
     'value',
     state.driver?.name || 'Driver unavailable',
   );
+  log('descriptor discovery complete', {driver, processor});
   summary.textContent = state.driver
     ? `${state.driver.name} ready. Enter Ito to choose a view.`
     : 'Recorded robot is unreachable.';
@@ -79,6 +99,7 @@ function showButtonGroup(group) {
 
 // Present the visual modes compatible with the selected driver.
 function showModes() {
+  log('driver selected; showing compatible visual modes');
   showButtonGroup('mode');
   document.querySelector('#processed-choice').setAttribute(
     'visible',
@@ -87,8 +108,28 @@ function showModes() {
 }
 
 // Return a new direct peer connection using local ICE candidates only.
-function createPeer() {
-  return new RTCPeerConnection({iceServers: []});
+function createPeer(name) {
+  const peerConnection = new RTCPeerConnection({iceServers: []});
+  peerConnection.addEventListener('icecandidate', (event) => {
+    log(`${name} ICE candidate`, event.candidate?.candidate || 'gathering complete');
+  });
+  peerConnection.addEventListener('icecandidateerror', (event) => {
+    console.warn(`[Ito] ${name} ICE candidate error`, event);
+  });
+  return peerConnection;
+}
+
+// Log DataChannel lifecycle and buffer state for direct-path diagnosis.
+function watchChannel(channel, peerName) {
+  for (const eventName of ['open', 'close', 'closing', 'error', 'bufferedamountlow']) {
+    channel.addEventListener(eventName, (event) => {
+      log(`${peerName} ${channel.label} channel ${eventName}`, {
+        readyState: channel.readyState,
+        bufferedAmount: channel.bufferedAmount,
+        error: event.error,
+      });
+    });
+  }
 }
 
 // Resolve after a DataChannel opens, or reject if it closes first.
@@ -109,6 +150,15 @@ function waitForChannel(channel) {
 
 // Reflect peer state and immediately disable control when a direct path fails.
 function watchPeer(peerConnection, name) {
+  for (const eventName of ['connectionstatechange', 'iceconnectionstatechange', 'signalingstatechange']) {
+    peerConnection.addEventListener(eventName, () => {
+      log(`${name} ${eventName}`, {
+        connection: peerConnection.connectionState,
+        ice: peerConnection.iceConnectionState,
+        signaling: peerConnection.signalingState,
+      });
+    });
+  }
   peerConnection.addEventListener('connectionstatechange', () => {
     state.connection = `${name}: ${peerConnection.connectionState}`;
     if (['failed', 'closed', 'disconnected'].includes(peerConnection.connectionState)) {
@@ -120,15 +170,18 @@ function watchPeer(peerConnection, name) {
 // Start the selected raw-video or processed-splat direct connection path.
 async function startSession(mode) {
   try {
+    log(`starting ${mode} session`);
     state.mode = mode;
     state.connection = 'connecting';
     showButtonGroup('control');
     exit.hidden = false;
 
-    driverPeer = createPeer();
+    driverPeer = createPeer('driver');
     watchPeer(driverPeer, 'driver');
     controlChannel = driverPeer.createDataChannel('control', {ordered: false, maxRetransmits: 0});
     driverStatusChannel = driverPeer.createDataChannel('status');
+    watchChannel(controlChannel, 'driver');
+    watchChannel(driverStatusChannel, 'driver');
     driverStatusChannel.addEventListener('message', handleDriverStatus);
     if (mode === 'raw') {
       driverPeer.addTransceiver('video', {direction: 'recvonly'});
@@ -142,18 +195,21 @@ async function startSession(mode) {
     }
     controlTimer = window.setInterval(sendControl, 1000 / 30);
   } catch (error) {
-    state.connection = `error: ${error.message}`;
+    reportError('session setup failed', error);
     stopControl('client-error');
   }
 }
 
 // Connect to the processor, then ask the driver how it can subscribe to video.
 async function connectProcessor() {
-  processorPeer = createPeer();
+  log('connecting processor and preparing scene channel');
+  processorPeer = createPeer('processor');
   watchPeer(processorPeer, 'processor');
   processorStatusChannel = processorPeer.createDataChannel('status');
   processorStatusChannel.addEventListener('message', handleProcessorStatus);
   sceneChannel = processorPeer.createDataChannel('scene');
+  watchChannel(processorStatusChannel, 'processor');
+  watchChannel(sceneChannel, 'processor');
   sceneChannel.binaryType = 'arraybuffer';
   sceneChannel.addEventListener('message', handleSceneMessage);
   await signal(processorPeer, `${PROCESSOR_URL}/webrtc`);
@@ -164,6 +220,7 @@ async function connectProcessor() {
 // Forward the driver's direct video-source descriptor or display its stop acknowledgement.
 function handleDriverStatus(event) {
   const message = JSON.parse(event.data);
+  log('driver status', message);
   if (message.type === 'video-source' && processorStatusChannel?.readyState === 'open') {
     processorStatusChannel.send(JSON.stringify(message));
   } else if (message.type === 'stop-ack') {
@@ -174,6 +231,7 @@ function handleDriverStatus(event) {
 // Display processor input readiness and freshness reported over status.
 function handleProcessorStatus(event) {
   const message = JSON.parse(event.data);
+  log('processor status', message);
   if (message.type === 'visual-state') {
     state.visual = `processor ${message.state} (${message.frames} frames)`;
     if (message.state === 'ready') {
@@ -184,6 +242,7 @@ function handleProcessorStatus(event) {
 
 // Attach the direct raw-video track to the immersive A-Frame video surface.
 function showVideo(event) {
+  log('received raw video track', {kind: event.track.kind, id: event.track.id});
   video.srcObject = new MediaStream([event.track]);
   video.play().catch(() => {
     state.visual = 'raw video waiting for playback';
@@ -205,49 +264,37 @@ function showVideo(event) {
   }
 }
 
-// Begin feeding a fresh processor byte stream directly into Spark's PLY decoder.
-function beginSplatStream(header) {
-  if (state.sceneTransfer) {
-    state.sceneTransfer.controller.error(new Error('replaced by a new splat stream'));
-    state.sceneTransfer = null;
-  }
-  if (state.splatMesh) {
-    scene.object3D.remove(state.splatMesh);
-    state.splatMesh.dispose();
+// Allocate the complete PLY buffer expected by the A-Frame-compatible Spark release.
+function beginSplatTransfer(header) {
+  if (!state.sparkReady) {
+    requestSceneResend('Spark renderer is not ready');
+    return;
   }
 
-  const stream = new ReadableStream({
-    start(controller) {
-      state.sceneTransfer = {controller, expected: header.bytes, received: 0};
-    },
-  });
-  const splatMesh = new SplatMesh({
-    stream,
-    streamLength: header.bytes,
-    fileType: 'ply',
-    onProgress: (event) => {
-      state.visual = `splat stream ${Math.round((event.loaded / header.bytes) * 100)}%`;
-    },
-    onLoad: () => {
-      state.visual = `Gaussian splats ready (${header.bytes} bytes)`;
-      state.lastVisualAt = performance.now();
-    },
-  });
-  state.splatMesh = splatMesh;
-  scene.object3D.add(splatMesh);
-  splatMesh.initialized.catch(() => {
-    if (state.splatMesh === splatMesh) {
-      requestSceneResend('Spark could not decode the stream');
+  try {
+    if (header.bytes > 1_000_000_000) {
+      console.warn('[Ito] very large splat scene may exceed browser memory', header);
     }
-  });
+    state.sceneTransfer = {
+      bytes: new Uint8Array(header.bytes),
+      expected: header.bytes,
+      received: 0,
+      chunks: 0,
+    };
+    state.visual = `receiving Gaussian splats (0 / ${header.bytes} bytes)`;
+    log('splat transfer started', header);
+  } catch (error) {
+    reportError(`could not allocate ${header.bytes} bytes for the splat scene`, error);
+  }
 }
 
-// Feed ordered binary DataChannel chunks into Spark without assembling another PLY copy.
+// Append ordered DataChannel chunks, then hand the completed PLY bytes to Spark.
 function handleSceneMessage(event) {
   if (typeof event.data === 'string') {
     const header = JSON.parse(event.data);
+    log('scene channel message', header);
     if (header.type === 'splat-stream' && header.format === 'ply') {
-      beginSplatStream(header);
+      beginSplatTransfer(header);
     }
     return;
   }
@@ -259,20 +306,56 @@ function handleSceneMessage(event) {
   }
 
   const chunk = new Uint8Array(event.data);
-  transfer.controller.enqueue(chunk);
-  transfer.received += chunk.byteLength;
-  if (transfer.received === transfer.expected) {
-    transfer.controller.close();
-    state.sceneTransfer = null;
-  } else if (transfer.received > transfer.expected) {
-    transfer.controller.error(new Error('splat stream exceeded its declared length'));
+  if (transfer.received + chunk.byteLength > transfer.expected) {
     state.sceneTransfer = null;
     requestSceneResend('stream length mismatch');
+    return;
   }
+
+  transfer.bytes.set(chunk, transfer.received);
+  transfer.received += chunk.byteLength;
+  transfer.chunks += 1;
+  if (transfer.chunks === 1 || transfer.chunks % 1000 === 0) {
+    log('splat transfer progress', {received: transfer.received, expected: transfer.expected});
+  }
+  state.visual = `receiving Gaussian splats (${transfer.received} / ${transfer.expected} bytes)`;
+
+  if (transfer.received === transfer.expected) {
+    state.sceneTransfer = null;
+    showSplats(transfer.bytes);
+  }
+}
+
+// Replace the current scene with a Spark mesh decoded by the shared A-Frame Three.js runtime.
+function showSplats(fileBytes) {
+  if (state.splatMesh) {
+    scene.object3D.remove(state.splatMesh);
+    state.splatMesh.dispose();
+  }
+
+  log('handing completed PLY to Spark', {bytes: fileBytes.byteLength});
+  const splatMesh = new SplatMesh({
+    fileBytes,
+    fileType: 'ply',
+    onLoad: () => {
+      state.visual = `Gaussian splats ready (${fileBytes.byteLength} bytes)`;
+      state.lastVisualAt = performance.now();
+      log('Spark loaded Gaussian splats', {splats: splatMesh.numSplats});
+    },
+  });
+  state.splatMesh = splatMesh;
+  scene.object3D.add(splatMesh);
+  splatMesh.initialized.catch((error) => {
+    reportError('Spark could not decode the PLY', error);
+    if (state.splatMesh === splatMesh) {
+      requestSceneResend('Spark could not decode the PLY');
+    }
+  });
 }
 
 // Ask for a complete replacement stream after a framing or Spark decode failure.
 function requestSceneResend(reason) {
+  console.warn('[Ito] requesting complete scene resend', reason);
   state.visual = `requesting splat resend: ${reason}`;
   if (sceneChannel?.readyState === 'open') {
     sceneChannel.send(JSON.stringify({type: 'resend-scene'}));
@@ -328,6 +411,7 @@ function stopControl(reason) {
 
 // Close every direct path and return the immersive scene to its setup choices.
 function endSession(reason = 'session-ended') {
+  log('ending session', reason);
   stopControl(reason);
   window.clearInterval(controlTimer);
   driverPeer?.close();
@@ -368,6 +452,7 @@ function touchButtons(component) {
 // Register the small per-frame bridge from A-Frame tracking to Ito interaction state.
 AFRAME.registerComponent('ito-app', {
   init() {
+    log('Ito A-Frame component initialized', {threeRevision: AFRAME.THREE.REVISION});
     this.touching = new Map();
   },
 
@@ -380,8 +465,18 @@ scene.setAttribute('ito-app', '');
 
 // Install Spark beside A-Frame's objects once its WebGL renderer exists.
 scene.addEventListener('renderstart', () => {
-  sparkRenderer = new SparkRenderer({renderer: scene.renderer});
-  scene.object3D.add(sparkRenderer);
+  try {
+    log('A-Frame render started', {
+      threeRevision: AFRAME.THREE.REVISION,
+      webgl2: scene.renderer.capabilities.isWebGL2,
+    });
+    sparkRenderer = new SparkRenderer({renderer: scene.renderer});
+    scene.object3D.add(sparkRenderer);
+    state.sparkReady = true;
+    log('Spark renderer initialized with A-Frame renderer');
+  } catch (error) {
+    reportError('Spark renderer initialization failed', error);
+  }
 });
 
 // Wire the static A-Frame blocks to direct actions.
@@ -395,18 +490,34 @@ document.querySelector('#stop-control').addEventListener('ito-touch', () => stop
 
 // Keep the browser-required user gesture obvious and available immediately.
 enter.addEventListener('click', async () => {
-  await scene.enterVR();
-  showButtonGroup('setup');
+  log('Enter Ito clicked', {isSecureContext, xrAvailable: Boolean(navigator.xr)});
+  try {
+    await scene.enterVR();
+    showButtonGroup('setup');
+  } catch (error) {
+    reportError('could not enter VR', error);
+  }
 });
 exit.addEventListener('click', () => endSession('operator-exit'));
-scene.addEventListener('exit-vr', () => endSession('xr-exit'));
+scene.addEventListener('enter-vr', () => log('entered VR'));
+scene.addEventListener('exit-vr', () => {
+  log('exited VR');
+  endSession('xr-exit');
+});
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     stopControl('lost-focus');
   }
 });
 window.addEventListener('blur', () => stopControl('lost-focus'));
-window.addEventListener('error', () => stopControl('client-error'));
+window.addEventListener('error', (event) => {
+  console.error('[Ito] uncaught browser error', event.error || event.message);
+  stopControl('client-error');
+});
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('[Ito] unhandled promise rejection', event.reason);
+  stopControl('client-error');
+});
 
 // Render concise debug state independently from network callbacks.
 window.setInterval(() => {
@@ -419,9 +530,16 @@ window.setInterval(() => {
     `connection: ${state.connection}`,
     `visual: ${state.visual}${stale ? ' (stale)' : ''}`,
     `tracking: ${state.tracking ? 'tracked' : 'not tracked'}`,
+    `spark: ${state.sparkReady ? 'ready' : 'not ready'}`,
     `control: ${state.enabled ? 'ENABLED' : 'stopped'}`,
     `driver stop: ${state.latestStop}`,
   ].join('\n');
 }, 250);
 
+log('client module loaded', {
+  aframe: AFRAME.version,
+  threeRevision: AFRAME.THREE.REVISION,
+  secureContext: isSecureContext,
+  xrAvailable: Boolean(navigator.xr),
+});
 discover();

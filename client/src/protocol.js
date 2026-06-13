@@ -11,6 +11,8 @@ export function processorMatches(driver, processor) {
   );
 }
 
+const LOG_PREFIX = '[Ito]';
+
 // Wait for host ICE candidates before sending the one-shot SDP offer.
 export async function completeIce(peerConnection) {
   if (peerConnection.iceGatheringState === 'complete') {
@@ -28,9 +30,16 @@ export async function completeIce(peerConnection) {
 
 // Exchange a browser-created offer for a service-created answer.
 export async function signal(peerConnection, url, purpose = 'client', configuration = {}) {
+  console.info(`${LOG_PREFIX} creating ${purpose} offer`, {url, configuration});
   const offer = await peerConnection.createOffer();
   await peerConnection.setLocalDescription(offer);
   await completeIce(peerConnection);
+  console.info(`${LOG_PREFIX} local offer ready`, {
+    url,
+    purpose,
+    signalingState: peerConnection.signalingState,
+    sdpLength: peerConnection.localDescription.sdp.length,
+  });
 
   const response = await fetch(url, {
     method: 'POST',
@@ -49,5 +58,12 @@ export async function signal(peerConnection, url, purpose = 'client', configurat
     throw new Error(`${url}: ${response.status} ${await response.text()}`);
   }
 
-  await peerConnection.setRemoteDescription(await response.json());
+  const answer = await response.json();
+  console.info(`${LOG_PREFIX} signaling answer received`, {
+    url,
+    purpose,
+    type: answer.type,
+    sdpLength: answer.sdp?.length,
+  });
+  await peerConnection.setRemoteDescription(answer);
 }

@@ -195,8 +195,8 @@ Implement in `client/` and follow `client/README.md`.
   - request video-source connection information from the driver;
   - pass it to the processor;
   - feed the incremental scene stream directly into Spark.
-- Feed sequential scene chunks into Spark through a `ReadableStream`. Request the
-  complete stream again if transfer fails.
+- Write sequential scene chunks into one preallocated buffer and hand the completed
+  PLY to Spark. Request the complete stream again if transfer fails.
 - Sample and send headset plus available controller poses at about 30 Hz.
 - Show simple immersive Enable and Stop controls.
 - Stop sending enabled commands on Stop, XR exit, lost focus, lost tracking,

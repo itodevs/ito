@@ -133,8 +133,8 @@ it. Old control messages are never useful.
 | `status` | both | video-source information, readiness, errors, resend request |
 
 On the reliable ordered `scene` channel, receive a small JSON header followed by
-sequential binary chunks. Feed the chunks directly into a SparkJS `ReadableStream`
-without creating a second assembled PLY buffer. If transfer fails, request the
+sequential binary chunks. Write the chunks into one preallocated PLY buffer, then hand the completed
+buffer to the A-Frame-compatible SparkJS release. If transfer fails, request the
 whole stream again. Do not implement scene manifests,
 revisions, stable chunk IDs, acknowledgements, or general resynchronization yet.
 

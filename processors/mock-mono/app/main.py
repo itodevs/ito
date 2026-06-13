@@ -85,11 +85,21 @@ class ProcessorSession:
             "bytes": len(self.splat_data),
         }))
         chunks = 0
+        bytes_sent = 0
+        log.info("splat_stream_start bytes=%d", len(self.splat_data))
         for chunk in iter_splat_chunks(self.splat_data):
             while channel.bufferedAmount > 1_000_000:
                 await asyncio.sleep(0.01)
             channel.send(chunk)
             chunks += 1
+            bytes_sent += len(chunk)
+            if chunks == 1 or chunks % 10_000 == 0:
+                log.info(
+                    "splat_stream_progress chunks=%d bytes_sent=%d buffered=%d",
+                    chunks,
+                    bytes_sent,
+                    channel.bufferedAmount,
+                )
         log.info("splat_stream_sent bytes=%d chunks=%d", len(self.splat_data), chunks)
 
     async def connect_source(self, source: dict) -> None:
@@ -194,6 +204,7 @@ async def webrtc(request: SignalRequest) -> dict:
     if splat_data is None:
         raise HTTPException(503, f"scene unavailable; mount SPLAT_FILE at {SPLAT_FILE}")
 
+    log.info("client_webrtc_offer sdp_bytes=%d", len(request.offer.sdp))
     peer = RTCPeerConnection(RTCConfiguration(iceServers=[]))
     session = ProcessorSession(splat_data)
     pcs.add(peer)
@@ -211,6 +222,7 @@ async def webrtc(request: SignalRequest) -> dict:
 
     @peer.on("datachannel")
     def datachannel(channel) -> None:
+        log.info("client_datachannel label=%s", channel.label)
         if channel.label == "scene":
             session.scene_channel = channel
 
@@ -235,4 +247,5 @@ async def webrtc(request: SignalRequest) -> dict:
     answer = await peer.createAnswer()
     await peer.setLocalDescription(answer)
     await wait_for_ice(peer)
+    log.info("client_webrtc_answer sdp_bytes=%d", len(peer.localDescription.sdp))
     return {"type": peer.localDescription.type, "sdp": peer.localDescription.sdp}

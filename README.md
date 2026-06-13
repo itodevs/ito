@@ -161,8 +161,9 @@ The client creates one peer connection to the selected processor.
 
 The first processor streams one mounted Gaussian-splat PLY over a reliable ordered
 DataChannel. It sends a small JSON header followed by sequential binary chunks
-because DataChannels have practical message-size limits. Spark consumes those
-bytes directly as a stream without a second assembled client buffer. The client can request
+because DataChannels have practical message-size limits. The browser receives those
+bytes incrementally, then hands the completed buffer to the A-Frame-compatible
+Spark release. The client can request
 the complete scene again if assembly fails. Do not build a general revision,
 manifest, acknowledgement, or resynchronization protocol until a changing scene
 exists.
