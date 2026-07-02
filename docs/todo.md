@@ -15,10 +15,15 @@ When checking off a TODO whose task description does not fully describe the impl
 5. [x] Implement server configuration from environment variables.
    - [x] Added env-backed `ServerConfig` for request timeout, driver watchdog, session cleanup timeout, and data channel profiles.
 6. [ ] Implement server WebSocket accept, hello, routing, and request timeouts.
-7. [ ] Implement robot-driver connection tracking and status watchdogs.
-8. [ ] Implement the in-memory Robot Catalog.
-9. [ ] Implement duplicate `robotId` detection.
-10. [ ] Implement pilot-client catalog requests.
+   - [x] Added MessagePack WebSocket accept, mandatory hello handling, basic role-based routing, and error results; outbound request timeout tracking is still deferred until acquisition/session-start requests are implemented.
+7. [x] Implement robot-driver connection tracking and status watchdogs.
+   - [x] Added driver connection records, disconnect handling, status freshness evaluation, and proactive watchdog marking for stale drivers.
+8. [x] Implement the in-memory Robot Catalog.
+   - [x] Added in-memory driver records that produce protocol Robot Catalog entries from latest driver status.
+9. [x] Implement duplicate `robotId` detection.
+   - [x] Duplicate driver hellos mark the affected robot unavailable and log an operational error instead of choosing one connection.
+10. [x] Implement pilot-client catalog requests.
+   - [x] Pilot clients can request `catalog.get` after hello and receive MessagePack `catalog.get.result` responses, with optional unavailable filtering.
 11. [ ] Implement server-side acquisition reservation.
 12. [ ] Implement driver session-start request/result handling.
 13. [ ] Implement server-owned session allocation.
