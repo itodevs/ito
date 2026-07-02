@@ -1,0 +1,20 @@
+services:
+  driver:
+    build: ./drivers/mock-robot
+    network_mode: host
+    environment:
+      VIDEO_FILE: /media/robot-video
+      PUBLIC_WEBRTC_URL: http://127.0.0.1:8001/webrtc
+    volumes:
+      - ${VIDEO_FILE:?Set VIDEO_FILE in .env}:/media/robot-video:ro
+  processor:
+    build: ./processors/mock-mono
+    network_mode: host
+    environment:
+      SPLAT_FILE: /media/scene.ply
+    volumes:
+      - ${SPLAT_FILE:?Set SPLAT_FILE in .env}:/media/scene.ply:ro
+  client:
+    build: ./client
+    network_mode: host
+    depends_on: [driver, processor]

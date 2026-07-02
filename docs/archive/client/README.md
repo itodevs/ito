@@ -11,7 +11,7 @@ visual processor's scene into a comfortable 3D view of the robot's
 surroundings. The same client is intended to pilot humanoids, droids, vehicles,
 mechas, and other robot forms through their respective drivers.
 
-The current client is a browser-based WebXR application built with Three.js. It
+The current client is a browser-based WebXR application built with A-Frame and SparkJS. It
 connects directly to a robot driver and optionally a visual processor, renders
 their output, and sends operator input to the driver.
 
@@ -20,11 +20,17 @@ does not need to establish a stable client API.
 
 ## Target
 
-The first target is a Windows PCVR browser using a standalone headset through
-Virtual Desktop. The client and services are developed and run from WSL2.
+The first target is a WebXR browser on the same Linux localhost as the
+containerized services. LAN deployment and production hosting are later work.
 
-Standalone-headset browsers, LAN deployment, and production hosting are later
-work.
+## Desktop WebXR Emulation
+
+The Meta Immersive Web Emulator can exercise the setup scene and controller
+interaction without a headset. Its polyfilled `XRSession` is incompatible with
+Chrome's native `XRWebGLBinding`, which A-Frame's Three.js r177 otherwise selects.
+The client detects the emulator's `CustomWebXRPolyfill` marker and disables the
+unused WebXR Layers path before entering VR, allowing Three.js to use the legacy
+`XRWebGLLayer` path. This workaround is not applied on real headset sessions.
 
 ## Responsibilities
 
@@ -132,12 +138,13 @@ it. Old control messages are never useful.
 
 | Channel | Direction | Contents |
 |---|---|---|
-| `scene` | processor to client | one PLY file sent as sequential binary chunks |
+| `scene` | processor to client | one Gaussian-splat PLY streamed as sequential binary chunks |
 | `status` | both | video-source information, readiness, errors, resend request |
 
 On the reliable ordered `scene` channel, receive a small JSON header followed by
-sequential binary chunks. Reassemble the PLY and render it with Spark. If
-transfer fails, request the whole file again. Do not implement scene manifests,
+sequential binary chunks. Write the chunks into one preallocated PLY buffer, then hand the completed
+buffer to the A-Frame-compatible SparkJS release. If transfer fails, request the
+whole stream again. Do not implement scene manifests,
 revisions, stable chunk IDs, acknowledgements, or general resynchronization yet.
 
 ## Rendering And Loops
@@ -194,7 +201,7 @@ and partial-failure orchestration can be added after a working path exists.
 4. Send headset/controller poses and exercise Enable and Stop.
 5. Establish a client-to-processor connection and pass it the driver's video
    connection information.
-6. Render one PLY scene received from the processor.
+6. Render one incrementally streamed Gaussian-splat scene with SparkJS.
 
 The code should remain easy to change. Prefer a small working path over
 abstractions for services and modes that do not exist yet.

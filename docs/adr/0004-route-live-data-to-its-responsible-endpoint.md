@@ -1,0 +1,7 @@
+# Route live data to its responsible endpoint
+
+Pilot input flows directly from the web client to the robot driver because the driver owns low-latency control translation. Robot camera footage normally flows to the Ito Server, which reconstructs an evolving Gaussian-splat scene and sends that scene to the client; the server is the intended processing endpoint, not a transparent relay. An optional Direct View may instead send camera footage directly from driver to client. TURN remains an allowed connectivity fallback for otherwise direct paths.
+
+This directional flow applies to live session data, not to session lifecycle/control-plane messages. The Ito Server communicates session lifecycle directly with both the Pilot Client and robot driver.
+
+V1 carries these live paths over three WebRTC peer connections: Pilot Client ↔ robot driver for pilot input, robot driver ↔ Ito Server for robot camera/media transport, and Ito Server ↔ Pilot Client for Splat Batches. V1 robot camera transport uses a WebRTC media track encoded as H.264, while bitrate, congestion behavior, and other media tuning are left to WebRTC defaults. The Ito Server owns decoding received camera media into frames for reconstruction inside the monolithic server boundary, using internal libraries or tools as needed. Reconstruction may be in-process or a subprocess inside the same server container, but not a separately deployed service. WebSocket handles Ito control-plane IPC and non-trickle WebRTC offer/answer signaling.
