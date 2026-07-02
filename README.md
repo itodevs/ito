@@ -20,28 +20,14 @@ comfortable immersive 3D reconstruction of its surroundings.
 
 ## Codebase
 
-WIP: the idea to separate all these things (processors, robot drivers) into separate programs that can each be docker containers, came from the observation that in order to have good support for (calibrated stereo) ROS camera feeds, you need rclpy which in turn needs a ROS installation, which is best solved using a docker container with ROS as the base image.
+Ito is being reset around the v1 design in `docs/v1.md`. Protocol seams are
+documented in `docs/protocol.md`, and architectural decisions are recorded in
+`docs/adr/`.
 
-### Client
+The main source directories are:
 
-The WebXR client you use from your VR headset. Connects to a robot driver and processing software.
-
-### Drivers
-
-This directory contains driver implementations per robot type.
-
-#### mock-robot
-
-Mock robot driver. Its (mono) camera input is a video file. For testing purposes only.
-
-#### ito-droid-one
-
-(Future) ROS2 driver.
-
-### Processors
-
-Video processing software. Turns live camera footage into a 3D reconstruction.
-
-#### mock-mono
-
-Mock processing program that receives but ignores the robot's camera feed and instead streams a gaussian splat .ply file to the client. For testing purposes only.
+- `server/`: Ito Server code.
+- `server/processors`: 3D reconstruction algorithms, applied.
+- `client/`: WebXR Pilot Client code.
+- `drivers/`: robot-side drivers and robot reference material.
+- `docs/`: design notes, protocol notes, and architectural decisions.

@@ -4,7 +4,7 @@ This document records the v1 IPC seams between the three Ito programs: Pilot Cli
 
 V1 keeps these contracts docs-first and manually implemented. The server and v1 robot drivers are Python. The Pilot Client is plain JavaScript. TypeScript and generated protocol bindings are deferred.
 
-The v1 protocol version identifier is `ito.v1`. Pilot Client, Ito Server, and Robot Driver must advertise this exact Ito Protocol Version in control-plane messages. If versions do not match, acquisition or session start fails fast with a clear acquisition failure reason or Session Termination Reason.
+The v1 protocol version identifier is `ito.v1`. Pilot Client, Ito Server, and Robot Driver must advertise this exact Ito Protocol Version in control-plane messages. If versions do not match, acquisition fails fast with a clear acquisition failure reason or Session Termination Reason.
 
 WebSocket control-plane messages use MessagePack over binary WebSocket frames. Protocol documentation describes decoded MessagePack maps as field tables; these examples are not JSON and should not be implemented as text frames.
 
@@ -59,13 +59,23 @@ V1 message types use dot-separated names scoped by domain/action. The v1 protoco
 - `robot.status`
 - `session.acquire`
 - `session.acquire.result`
-- `session.start`
-- `session.start.result`
+- `driver.session.start`
+- `driver.session.start.result`
 - `session.end`
 - `session.end.result`
 - `session.ended`
 - `webrtc.offer`
 - `webrtc.answer`
+
+Acquisition is serialized by the Ito Server. When handling `session.acquire`,
+the server atomically reserves the selected robot before asking the robot driver
+to start the session. While that request is pending, the robot is Occupied and
+other acquisition attempts for the same robot fail or observe it as not
+Available. If the driver start procedure succeeds, `session.acquire.result`
+returns the server-owned Session Identity to the Pilot Client. If it fails or
+times out, the server releases the reservation and returns a failed
+`session.acquire.result`. V1 does not expose separate Allocated and Active
+session states in protocol messages.
 
 ## WebSocket connection lifecycle
 
@@ -84,7 +94,7 @@ The Ito Server replies with `connection.hello.result`. If the protocol version, 
 Reconnect behavior:
 
 - Robot Drivers reconnect forever with backoff.
-- Pilot Clients reconnect while the app is open and, during an active or recoverable piloting session, include the existing `sessionId` in `connection.hello`.
+- Pilot Clients reconnect while the app is open and, during a recoverable piloting session, include the existing `sessionId` in `connection.hello`.
 - The Ito Server decides whether a reconnected endpoint can resume an existing session.
 - When a session resumes after WebSocket reconnect, v1 recreates the relevant WebRTC peer connections with fresh non-trickle offer/answer signaling. Ito does not try to preserve old WebRTC peer connections across reconnect/resume.
 - If a Pilot Client reconnects after the session is gone or no longer resumable, the server returns a failed `connection.hello.result`; the client shows the Display Reason and returns to the Robot Catalog.
@@ -94,7 +104,7 @@ Reconnect behavior:
 
 - `Pilot Client`: WebXR browser application that renders the pilot view and sends Pilot Input Snapshots.
 - `Ito Server`: Python application that owns catalog/session authority and runs reconstruction.
-- `Robot Driver`: Python application for v1 Ito Droid that reports availability, handles session start/end, receives pilot input, forwards sensor feeds, and translates input to robot-specific commands.
+- `Robot Driver`: Python application for v1 Ito Droid that reports availability, handles driver-side session start/end procedures, receives pilot input, forwards sensor feeds, and translates input to robot-specific commands.
 
 ## V1 seams
 
@@ -106,9 +116,9 @@ Reconnect behavior:
 
 ### Ito Server ↔ Robot Driver
 
-- WebSocket: driver status/heartbeat, session start/end control-plane messages, displayable errors/reasons, and non-trickle WebRTC signaling.
+- WebSocket: driver status/heartbeat, driver-side session start/end control-plane messages, displayable errors/reasons, and non-trickle WebRTC signaling.
 - WebRTC media track: H.264 robot camera media from driver to server.
-- Session lifecycle: server tells the driver when a session has been allocated or ended; driver can request session end for non-recoverable driver/robot conditions.
+- Session lifecycle: server asks the driver to perform session start/end procedures; driver can request session end for non-recoverable driver/robot conditions.
 - Catalog reporting: driver reports `robotId`, `name`, Robot Type, availability, and availability detail.
 - `robotId` is a stable machine-readable key for catalog/session bookkeeping, not a credential. If two connected drivers report the same `robotId`, the server must not pick one; it marks the affected robot Unavailable and logs an error.
 - The Ito Server applies a Driver Status Watchdog. V1 drivers send status/heartbeat every 1 second by default, and the server marks the robot Unavailable if the driver WebSocket disconnects or if no fresh status/heartbeat arrives within 2 seconds by default. Both values are configurable by environment variable. The server evaluates this proactively rather than waiting for a client catalog request.

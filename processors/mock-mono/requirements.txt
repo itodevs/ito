@@ -1,5 +1,0 @@
-aiortc==1.14.0
-av==16.1.0
-fastapi==0.136.3
-uvicorn[standard]==0.41.0
-httpx==0.28.1

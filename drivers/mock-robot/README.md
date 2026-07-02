@@ -1,12 +1,6 @@
-# Recorded robot driver
+# Mock Robot
 
-The recorded driver loops `VIDEO_FILE`, shares it through `MediaRelay`, and
-accepts direct WebRTC client-control and processor-video peers. It logs accepted
-WebXR poses and remains the final authority for disabled, disconnected, and
-500 ms watchdog stops.
+The Mock Robot is Ito's robot-driver test double.
 
-Run it through the root Compose application or set `VIDEO_FILE` and run:
-
-```bash
-uvicorn app.main:app --port 8001
-```
+This directory is currently a placeholder while Ito is reset around the v1
+design in `../../docs/v1.md`.

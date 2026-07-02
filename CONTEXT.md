@@ -69,11 +69,11 @@ The server-owned duration after which a robot becomes Unavailable if its driver 
 _Avoid_: Pilot input timeout, session cleanup timeout, control-loss timeout
 
 **Robot Status**:
-Current availability/session state used to present a catalog entry. V1 states are Available, Occupied, and Unavailable. Available and Unavailable come from driver availability plus server connectivity; Occupied is assigned by the Ito Server when it allocates a piloting session.
+Current availability/session state used to present a catalog entry. V1 states are Available, Occupied, and Unavailable. Available and Unavailable come from driver availability plus server connectivity; Occupied is assigned by the Ito Server when it reserves or allocates the robot for a pilot.
 _Avoid_: Catalog metadata
 
 **Occupied Robot**:
-A robot for which the Ito Server has allocated an active piloting session.
+A robot that the Ito Server has reserved for an in-progress acquisition or allocated to a piloting session.
 _Avoid_: Connected robot, busy robot
 
 **Robot Driver**:
@@ -92,16 +92,8 @@ _Avoid_: API version, feature negotiation
 A bounded, exclusive period in which the Ito Server allocates one pilot control authority over one robot. It can survive temporary loss or replacement of its network connection.
 _Avoid_: WebRTC session, peer session
 
-**Allocated Session**:
-A piloting session reserved by the Ito Server before the robot driver has completed its session-start procedure.
-_Avoid_: Active session, driver-ready session
-
-**Active Session**:
-A piloting session whose robot driver has completed its session-start procedure and is ready to accept pilot input for that session.
-_Avoid_: Allocated session, connected session
-
 **Session Authority**:
-The responsibility for deciding whether a pilot may acquire a robot and for serializing competing acquisition attempts. The Ito Server is the session authority; the robot driver remains the control safety authority.
+The responsibility for deciding whether a pilot may acquire a robot and for serializing competing acquisition attempts. The Ito Server is the session authority and may reserve a robot during acquisition to prevent races; the robot driver remains the control safety authority.
 _Avoid_: Control safety authority, robot driver authority
 
 **Driver-Terminated Session**:
@@ -171,6 +163,10 @@ _Avoid_: Hidden test mode, replay mode
 **Reconstruction**:
 A session-scoped, evolving three-dimensional representation derived from robot sensor input. It gives the pilot a locally responsive viewpoint despite robot-motion and network latency.
 _Avoid_: Persistent map, processed view, processor output
+
+**Reconstruction Algorithm**:
+A server-internal method for turning a compatible Capture Modality into Splat Batches for a piloting session.
+_Avoid_: Deployed processor, visual processor, client renderer
 
 **Reconstruction Failure**:
 A failure of the session-scoped reconstruction pipeline that prevents Ito from producing fresh Splat Batches for that session. It should stop the affected piloting session without crashing the Ito Server.
