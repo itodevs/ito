@@ -129,6 +129,156 @@ Reconnect behavior:
 - V1 default channel profile is unordered and unreliable; profile is session configuration supplied by the server.
 - The driver uses the newest available Pilot Input Snapshot at each Driver Control Tick and owns control-loss and resumption behavior.
 
+
+## V1 payload tables
+
+### `catalog.get`
+
+Pilot Client request to fetch the current Robot Catalog. Expects `catalog.get.result`. Request Timeout impact: fail only this catalog refresh in the Pilot Client.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `includeUnavailable` | no | Boolean. Defaults to `true`; v1 clients normally include unavailable known robots so operational defects stay visible. |
+
+### `catalog.get.result`
+
+Standard result payload. On success, `value` contains:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `robots` | yes | Array of Robot Catalog Entry maps. |
+
+Robot Catalog Entry fields:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `robotId` | yes | Stable machine-readable Robot Identity supplied by the driver. |
+| `name` | yes | Pilot-facing proper robot name supplied by the driver and displayed as-is. |
+| `type` | yes | Robot Type: `Mecha`, `Android Robot`, `Droid`, `Drone`, `Car`, or `Plane`. |
+| `status` | yes | Robot Status: `Available`, `Occupied`, or `Unavailable`. |
+| `availabilityDetail` | no | Display Reason map explaining current availability or unavailability. |
+
+### `connection.hello.result`
+
+Standard result payload. On success, `value` contains:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `protocolVersion` | yes | Accepted Ito Protocol Version, `ito.v1`. |
+| `role` | yes | Accepted role: `pilotClient` or `robotDriver`. |
+| `sessionResumed` | no | Boolean, present for Pilot Client reconnect attempts. `true` means the server accepted the claimed session for resume. |
+| `sessionConfig` | no | Session Configuration map when a piloting session is resumed. |
+
+### `robot.status`
+
+Robot Driver heartbeat/status report. Fire-and-forget; no response expected. The Ito Server uses receipt time for the Driver Status Watchdog.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `name` | yes | Pilot-facing proper robot name. |
+| `type` | yes | Robot Type: `Mecha`, `Android Robot`, `Droid`, `Drone`, `Car`, or `Plane`. |
+| `status` | yes | Driver-declared Robot Status: normally `Available` or `Unavailable`; the server may publish `Occupied` while reserved or in session. |
+| `availabilityDetail` | no | Display Reason map or free text fallback for catalog display. |
+
+### `session.acquire`
+
+Pilot Client request to acquire an available robot. Expects `session.acquire.result`. Request Timeout impact: fail only this acquisition attempt in the Pilot Client; the server remains responsible for releasing any reservation it owns.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `robotId` | yes | Robot Identity to acquire. Also appears in the envelope `robotId`. |
+
+### `session.acquire.result`
+
+Standard result payload. On success, `value` contains:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `sessionId` | yes | Server-owned Session Identity allocated for this piloting session. |
+| `robotId` | yes | Acquired Robot Identity. |
+| `sessionConfig` | yes | Session Configuration map for WebRTC data channel profiles and client-owned runtime behavior. |
+
+### `driver.session.start`
+
+Ito Server request asking a Robot Driver to perform session-start procedures. Expects `driver.session.start.result`. Request Timeout impact: server releases the acquisition reservation and fails the pending `session.acquire` with a Display Reason.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `sessionId` | yes | Server-owned Session Identity. Also appears in envelope `sessionId`. |
+| `sessionConfig` | yes | Session Configuration map relevant to driver setup and WebRTC paths. |
+
+### `driver.session.start.result`
+
+Standard result payload. On success, `value` contains:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `sessionId` | yes | Session Identity that is ready to start exchanging live data. |
+
+### `session.end`
+
+Request to end a piloting session. May be sent by the Pilot Client or Robot Driver to the Ito Server, and by the Ito Server to the Robot Driver for clean session-end procedure. Expects `session.end.result` when sent as a request. Request Timeout impact: the server still marks the session ended and fans out `session.ended` without waiting for driver acknowledgement.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `reason` | no | Display Reason map for why the session is ending. |
+| `clean` | no | Boolean. `true` for normal pilot-requested stop; `false` or absent for failures or unknown cleanliness. |
+
+### `session.end.result`
+
+Standard result payload. On success, `value` contains:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `sessionId` | yes | Session Identity whose endpoint-specific end procedure accepted the request. |
+
+### `session.ended`
+
+Server event sent directly to the Pilot Client and Robot Driver after the server has marked the session ended. Fire-and-forget; no response expected.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `reason` | yes | Display Reason map for pilot display and driver logging. |
+| `endedBy` | yes | `pilotClient`, `robotDriver`, or `server`. |
+| `clean` | no | Boolean indicating normal stop when known. |
+
+### `webrtc.offer`
+
+Non-trickle WebRTC Session Description Protocol offer. Expects `webrtc.answer`. Request Timeout impact depends on the live path: during acquisition it fails acquisition; during active-session renegotiation it ends the affected session.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `path` | yes | Live path being negotiated: `pilotInput`, `cameraMedia`, or `splatBatches`. |
+| `sdp` | yes | Complete SDP offer string after ICE gathering is complete. |
+
+### `webrtc.answer`
+
+Non-trickle WebRTC Session Description Protocol answer. Response to `webrtc.offer`.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `path` | yes | Live path being negotiated: `pilotInput`, `cameraMedia`, or `splatBatches`. |
+| `sdp` | yes | Complete SDP answer string after ICE gathering is complete. |
+
+## Shared value maps
+
+### Session Configuration
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `pilotInputDataChannel` | yes | Data Channel Profile for Pilot Input Snapshots. |
+| `splatBatchDataChannel` | yes | Data Channel Profile for Splat Batches. |
+| `pilotInputRateHz` | no | Server-provided default or accepted client runtime setting. |
+| `visualFreshnessTimeoutMs` | no | Client visual-freshness timeout value for this session. |
+
+### Data Channel Profile
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `ordered` | yes | Boolean WebRTC data channel ordering flag. |
+| `maxRetransmits` | no | WebRTC `maxRetransmits`; absent means browser/runtime default. |
+| `maxPacketLifeTime` | no | WebRTC `maxPacketLifeTime`; absent means browser/runtime default. |
+
 ## Contract style
 
 - WebSocket control-plane messages should be documented as explicit MessagePack envelope and payload shapes before or alongside implementation.

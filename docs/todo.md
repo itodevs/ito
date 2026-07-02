@@ -2,12 +2,18 @@
 
 Reference docs are canonical: `README.md`, `docs/v1.md`, `docs/protocol.md`, and `docs/adr/`.
 Keep task details in those docs rather than duplicating them here.
+When checking off a TODO whose task description does not fully describe the implementation, add a nested checked box with a useful note for the next agent.
 
-1. [ ] Define the v1 protocol payload tables missing from `docs/protocol.md`.
-2. [ ] Create the shared protocol constants and MessagePack envelope helpers.
-3. [ ] Add protocol-version validation and Display Reason helpers.
-4. [ ] Scaffold the Python Ito Server application and container.
-5. [ ] Implement server configuration from environment variables.
+1. [x] Define the v1 protocol payload tables missing from `docs/protocol.md`.
+   - [x] Added payload tables for all initial v1 message types plus shared Session Configuration and Data Channel Profile maps.
+2. [x] Create the shared protocol constants and MessagePack envelope helpers.
+   - [x] Added Python shared constants, envelope creation, validation, and MessagePack pack/unpack helpers under `server/ito/protocol.py`.
+3. [x] Add protocol-version validation and Display Reason helpers.
+   - [x] Added exact `ito.v1` validation, standard result payload helpers, and Display Reason validation.
+4. [x] Scaffold the Python Ito Server application and container.
+   - [x] Added `server.ito.app` entry point, package scaffolding, requirements, and `server/Dockerfile`.
+5. [x] Implement server configuration from environment variables.
+   - [x] Added env-backed `ServerConfig` for request timeout, driver watchdog, session cleanup timeout, and data channel profiles.
 6. [ ] Implement server WebSocket accept, hello, routing, and request timeouts.
 7. [ ] Implement robot-driver connection tracking and status watchdogs.
 8. [ ] Implement the in-memory Robot Catalog.
