@@ -1,0 +1,11 @@
+# Let the client own the Splat Scene
+
+The Ito Server sends newly reconstructed Splat Batches but does not maintain an authoritative copy of the pilot's rendered scene. The client adds each batch, then evicts batches that exceed its configurable Splat Lifetime and removes the oldest remaining batches when its configurable Splat Budget is exceeded. Client runtime settings are stored in browser Local Storage with sane code defaults. Splat Batch payloads are binary and should be shaped around efficient SparkJS ingestion. The v1 default Splat Batch data channel is reliable and ordered, with the profile configurable through server container environment variables. This avoids server/client scene synchronization and lets weaker headsets bound their own resource use, at the accepted cost that incorrect geometry can remain visible until its batch is evicted.
+
+When visual freshness times out, the client freezes the last known Splat Scene while showing a stale/paused state. If fresh Splat Batches resume while the session still exists, the client unfreezes the scene and resumes normal batch application and eviction.
+
+If the server resets reconstruction state within the same piloting session, v1 does not require an explicit client-side Splat Scene clear. The client continues applying normal Splat Batch insertion, Splat Lifetime, and Splat Budget eviction; new splats gradually replace older splats as they do during normal operation. The selected reconstruction algorithm should therefore produce post-reset Splat Batches that remain usable in the session's visual frame, or this assumption must be revisited.
+
+The server does not send a `reconstruction.reset` control-plane event in v1. If fresh splats continue arriving, the client does not need to know that the server reset internal reconstruction state. If fresh splats stop arriving, the existing Visual Freshness Timeout handles the pilot-visible state. If reconstruction cannot restart, the session ends with a Session Termination Reason.
+
+When a session ends, the client initially freezes the last known Splat Scene and overlays the Session Termination Reason plus a return-to-catalog action. The catalog replaces the scene only after the pilot chooses to return.
