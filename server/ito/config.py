@@ -78,19 +78,19 @@ class ServerConfig:
                 cls.session_cleanup_timeout_ms,
                 minimum=1,
             ),
-            pilot_input_data_channel=DataChannelConfig(
-                ordered=_env_bool("ITO_PILOT_INPUT_ORDERED", False),
-                max_retransmits=_optional_int("ITO_PILOT_INPUT_MAX_RETRANSMITS", 0),
-                max_packet_lifetime_ms=_optional_int(
-                    "ITO_PILOT_INPUT_MAX_PACKET_LIFETIME_MS", None
-                ),
+            pilot_input_data_channel=_data_channel_config_from_env(
+                ordered_name="ITO_PILOT_INPUT_ORDERED",
+                ordered_default=False,
+                max_retransmits_name="ITO_PILOT_INPUT_MAX_RETRANSMITS",
+                max_retransmits_default=0,
+                max_packet_lifetime_name="ITO_PILOT_INPUT_MAX_PACKET_LIFETIME_MS",
             ),
-            splat_batch_data_channel=DataChannelConfig(
-                ordered=_env_bool("ITO_SPLAT_BATCH_ORDERED", True),
-                max_retransmits=_optional_int("ITO_SPLAT_BATCH_MAX_RETRANSMITS", None),
-                max_packet_lifetime_ms=_optional_int(
-                    "ITO_SPLAT_BATCH_MAX_PACKET_LIFETIME_MS", None
-                ),
+            splat_batch_data_channel=_data_channel_config_from_env(
+                ordered_name="ITO_SPLAT_BATCH_ORDERED",
+                ordered_default=True,
+                max_retransmits_name="ITO_SPLAT_BATCH_MAX_RETRANSMITS",
+                max_retransmits_default=None,
+                max_packet_lifetime_name="ITO_SPLAT_BATCH_MAX_PACKET_LIFETIME_MS",
             ),
         )
 
@@ -106,3 +106,35 @@ def _optional_int(name: str, default: int | None) -> int | None:
     if raw is None or raw == "":
         return default
     return _env_int(name, 0, minimum=0)
+
+
+def _env_is_set(name: str) -> bool:
+    raw = os.getenv(name)
+    return raw is not None and raw != ""
+
+
+def _data_channel_config_from_env(
+    *,
+    ordered_name: str,
+    ordered_default: bool,
+    max_retransmits_name: str,
+    max_retransmits_default: int | None,
+    max_packet_lifetime_name: str,
+) -> DataChannelConfig:
+    has_max_retransmits = _env_is_set(max_retransmits_name)
+    has_max_packet_lifetime = _env_is_set(max_packet_lifetime_name)
+    if has_max_retransmits and has_max_packet_lifetime:
+        raise ValueError(
+            f"{max_retransmits_name} and {max_packet_lifetime_name} are mutually exclusive"
+        )
+
+    max_packet_lifetime_ms = _optional_int(max_packet_lifetime_name, None)
+    max_retransmits = _optional_int(
+        max_retransmits_name,
+        None if has_max_packet_lifetime else max_retransmits_default,
+    )
+    return DataChannelConfig(
+        ordered=_env_bool(ordered_name, ordered_default),
+        max_retransmits=max_retransmits,
+        max_packet_lifetime_ms=max_packet_lifetime_ms,
+    )
