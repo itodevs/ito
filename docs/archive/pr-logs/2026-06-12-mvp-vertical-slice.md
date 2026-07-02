@@ -53,3 +53,14 @@ That compatible Spark release accepts completed `fileBytes`, not a
 messages, but the client writes them into one preallocated PLY buffer before
 handing it to Spark. The current 3.46 GB demo scene is likely to exceed practical
 browser memory, so the client logs an explicit warning for scenes over 1 GB.
+
+## 2026-06-13: Use the legacy WebXR layer path in Immersive Web Emulator
+
+The Meta Immersive Web Emulator identifies itself with
+`window.CustomWebXRPolyfill`. With Three.js r173 and newer, the presence of the
+browser's native `XRWebGLBinding` selects the WebXR Layers path, but that native
+constructor rejects the emulator's polyfilled session because it is not a native
+`XRSession`. Ito does not use WebXR Layers, so the client deletes
+`XRWebGLBinding` immediately before emulator session entry. This makes Three.js
+fall back to `XRWebGLLayer` and is intentionally limited to the emulator marker;
+real headset sessions retain the normal browser capabilities.

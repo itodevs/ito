@@ -23,6 +23,15 @@ does not need to establish a stable client API.
 The first target is a WebXR browser on the same Linux localhost as the
 containerized services. LAN deployment and production hosting are later work.
 
+## Desktop WebXR Emulation
+
+The Meta Immersive Web Emulator can exercise the setup scene and controller
+interaction without a headset. Its polyfilled `XRSession` is incompatible with
+Chrome's native `XRWebGLBinding`, which A-Frame's Three.js r177 otherwise selects.
+The client detects the emulator's `CustomWebXRPolyfill` marker and disables the
+unused WebXR Layers path before entering VR, allowing Three.js to use the legacy
+`XRWebGLLayer` path. This workaround is not applied on real headset sessions.
+
 ## Responsibilities
 
 The client owns:
