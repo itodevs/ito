@@ -128,6 +128,7 @@ Reconnect behavior:
 - WebRTC data channel: Pilot Input Snapshots from client to driver.
 - V1 default channel profile is unordered and unreliable; profile is session configuration supplied by the server.
 - The driver uses the newest available Pilot Input Snapshot at each Driver Control Tick and owns control-loss and resumption behavior.
+- Pilot Input Snapshot data-channel messages are UTF-8 JSON in v1 because the payload is small control state, not high-volume reconstruction data. Each message is a full snapshot with `protocolVersion`, `sessionId`, `sequence`, `timestampMs`, `headsetYawRad`, and `controllers`.
 
 
 ## V1 payload tables
@@ -278,6 +279,36 @@ Non-trickle WebRTC Session Description Protocol answer. Response to `webrtc.offe
 | `ordered` | yes | Boolean WebRTC data channel ordering flag. |
 | `maxRetransmits` | no | WebRTC `maxRetransmits`; absent means browser/runtime default. |
 | `maxPacketLifeTime` | no | WebRTC `maxPacketLifeTime`; absent means browser/runtime default. |
+
+## Splat Batch binary layout
+
+V1 Splat Batches are binary WebRTC data-channel messages. Multi-byte values are little-endian.
+
+Header, 28 bytes:
+
+| Offset | Type | Field |
+| --- | --- | --- |
+| 0 | `char[8]` | Magic bytes `ITOSPLAT`. |
+| 8 | `uint16` | Format version, currently `1`. |
+| 10 | `uint16` | Flags, currently `0` unless a processor-specific extension is documented. |
+| 12 | `uint32` | Batch sequence. |
+| 16 | `uint32` | Splat count. |
+| 20 | `uint16` | Record stride in bytes, currently `36`. |
+| 22 | `uint8[6]` | Reserved, zero-filled. |
+
+Each splat record is 36 bytes:
+
+| Offset | Type | Field |
+| --- | --- | --- |
+| 0 | `float32[3]` | Position xyz. |
+| 12 | `float32[3]` | Scale xyz. |
+| 24 | `int16[4]` | Rotation quaternion xyzw normalized to `[-32767, 32767]`. |
+| 32 | `uint8[4]` | RGBA color. |
+
+This layout is intentionally compact and directly typed-array friendly for the
+Pilot Client. Spark.JS-specific insertion may still choose a faster internal
+copy path after Pico 4 testing, but that must preserve this wire layout unless
+the protocol version changes.
 
 ## Contract style
 

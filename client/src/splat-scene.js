@@ -115,6 +115,37 @@ export class SparkJsSplatAdapter {
   }
 }
 
+export class DataChannelSplatBatchReceiver {
+  constructor(sceneOwner) {
+    this.sceneOwner = sceneOwner;
+  }
+
+  attach(dataChannel) {
+    dataChannel.binaryType = "arraybuffer";
+    dataChannel.addEventListener("message", (event) => {
+      const payload = event.data instanceof ArrayBuffer ? event.data : event.data?.buffer;
+      if (payload) this.sceneOwner.applySplatBatch(payload, parseSplatBatchHeader(payload));
+    });
+  }
+}
+
+export function parseSplatBatchHeader(payload) {
+  const view =
+    payload instanceof ArrayBuffer
+      ? new DataView(payload)
+      : new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  const magic = String.fromCharCode(...new Uint8Array(view.buffer, view.byteOffset, 8));
+  if (magic !== "ITOSPLAT") throw new Error("invalid Ito Splat Batch");
+  const version = view.getUint16(8, true);
+  if (version !== 1) throw new Error(`unsupported Ito Splat Batch version: ${version}`);
+  return {
+    flags: view.getUint16(10, true),
+    id: `splat-batch-${view.getUint32(12, true)}`,
+    splatCount: view.getUint32(16, true),
+    recordStride: view.getUint16(20, true),
+  };
+}
+
 function estimateSplatCount(payload) {
   if (payload?.byteLength) return Math.max(1, Math.floor(payload.byteLength / 32));
   return 1;

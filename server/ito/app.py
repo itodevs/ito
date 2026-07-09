@@ -33,15 +33,21 @@ from .protocol import (
     TYPE_SESSION_END,
     TYPE_SESSION_END_RESULT,
     TYPE_SESSION_ENDED,
+    TYPE_WEBRTC_ANSWER,
+    TYPE_WEBRTC_OFFER,
     TYPE_CONNECTION_HELLO,
     TYPE_CONNECTION_HELLO_RESULT,
     TYPE_ROBOT_STATUS,
+    WEBRTC_PATH_CAMERA_MEDIA,
+    WEBRTC_PATH_PILOT_INPUT,
+    WEBRTC_PATH_SPLAT_BATCHES,
     make_envelope,
     pack_envelope,
     result_error,
     result_ok,
     unpack_envelope,
 )
+from .webrtc import MissingWebRtcStack, ServerLivePathAcceptor, SplatBatchChannelRegistry
 
 LOGGER = logging.getLogger(__name__)
 
@@ -126,6 +132,9 @@ class ItoServer:
         self.drivers: dict[str, DriverRecord] = {}
         self.sessions: dict[str, SessionRecord] = {}
         self._pending_requests: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        self._pending_webrtc_routes: dict[str, tuple[ConnectionState, str]] = {}
+        self.splat_channels = SplatBatchChannelRegistry()
+        self.live_paths: ServerLivePathAcceptor = MissingWebRtcStack()
         self._acquisition_lock = asyncio.Lock()
         self._watchdog_task: asyncio.Task[None] | None = None
         self._cleanup_task: asyncio.Task[None] | None = None
@@ -198,6 +207,10 @@ class ItoServer:
             await self._handle_session_acquire(state, envelope)
         elif envelope["type"] == TYPE_SESSION_END:
             await self._handle_session_end(state, envelope)
+        elif envelope["type"] == TYPE_WEBRTC_OFFER:
+            await self._handle_webrtc_offer(state, envelope)
+        elif envelope["type"] == TYPE_WEBRTC_ANSWER:
+            await self._handle_webrtc_answer(state, envelope)
         else:
             result_type = {
                 TYPE_SESSION_ACQUIRE: TYPE_SESSION_ACQUIRE_RESULT,
@@ -424,6 +437,107 @@ class ItoServer:
 
         await self._send_result(state, TYPE_SESSION_END_RESULT, envelope["messageId"], result_ok({"sessionId": session_id}))
         await self._end_session(session, reason=reason, ended_by=ended_by, clean=clean, request_driver_end=state is not session.driver_connection)
+
+    async def _handle_webrtc_offer(self, state: ConnectionState, envelope: dict[str, Any]) -> None:
+        session = self._session_for_live_path(state, envelope)
+        if session is None:
+            LOGGER.warning("Ignoring WebRTC offer for unknown or inactive session")
+            return
+        path = envelope["payload"]["path"]
+        if path == WEBRTC_PATH_PILOT_INPUT:
+            await self._relay_pilot_input_offer(state, session, envelope)
+            return
+        if path not in {WEBRTC_PATH_CAMERA_MEDIA, WEBRTC_PATH_SPLAT_BATCHES}:
+            LOGGER.warning("Ignoring unsupported WebRTC path %s", path)
+            return
+        if (path == WEBRTC_PATH_CAMERA_MEDIA and state is not session.driver_connection) or (
+            path == WEBRTC_PATH_SPLAT_BATCHES and state is not session.pilot_connection
+        ):
+            LOGGER.warning("Ignoring WebRTC %s offer from wrong endpoint", path)
+            return
+        try:
+            answer_sdp = await self.live_paths.accept_offer(
+                path=path,
+                session_id=session.session_id,
+                sdp=envelope["payload"]["sdp"],
+            )
+        except Exception as exc:
+            LOGGER.exception("WebRTC %s negotiation failed for session %s", path, session.session_id)
+            await self._end_session(
+                session,
+                reason={"code": "session.ended.reconstruction_failed", "text": str(exc)},
+                ended_by="server",
+                clean=False,
+                request_driver_end=True,
+            )
+            return
+        await state.websocket.send(
+            pack_envelope(
+                make_envelope(
+                    TYPE_WEBRTC_ANSWER,
+                    {"path": path, "sdp": answer_sdp},
+                    reply_to_message_id=envelope["messageId"],
+                    robot_id=session.robot_id,
+                    session_id=session.session_id,
+                )
+            )
+        )
+
+    async def _relay_pilot_input_offer(
+        self,
+        state: ConnectionState,
+        session: SessionRecord,
+        envelope: dict[str, Any],
+    ) -> None:
+        if state is not session.pilot_connection or session.driver_connection is None:
+            LOGGER.warning("Ignoring pilot-input WebRTC offer without pilot and driver endpoints")
+            return
+        forwarded = make_envelope(
+            TYPE_WEBRTC_OFFER,
+            envelope["payload"],
+            robot_id=session.robot_id,
+            session_id=session.session_id,
+        )
+        self._pending_webrtc_routes[forwarded["messageId"]] = (state, envelope["messageId"])
+        await session.driver_connection.websocket.send(pack_envelope(forwarded))
+
+    async def _handle_webrtc_answer(self, state: ConnectionState, envelope: dict[str, Any]) -> None:
+        reply_to = envelope.get("replyToMessageId")
+        if not isinstance(reply_to, str):
+            LOGGER.warning("Ignoring WebRTC answer without replyToMessageId")
+            return
+        route = self._pending_webrtc_routes.pop(reply_to, None)
+        if route is None:
+            LOGGER.warning("Ignoring WebRTC answer for unknown offer %s", reply_to)
+            return
+        destination, original_message_id = route
+        session = self._session_for_live_path(destination, envelope)
+        if session is None:
+            return
+        await destination.websocket.send(
+            pack_envelope(
+                make_envelope(
+                    TYPE_WEBRTC_ANSWER,
+                    envelope["payload"],
+                    reply_to_message_id=original_message_id,
+                    robot_id=session.robot_id,
+                    session_id=session.session_id,
+                )
+            )
+        )
+
+    def _session_for_live_path(
+        self, state: ConnectionState, envelope: dict[str, Any]
+    ) -> SessionRecord | None:
+        session_id = envelope.get("sessionId") or state.session_id
+        if not isinstance(session_id, str):
+            return None
+        session = self.sessions.get(session_id)
+        if session is None or session.state != SESSION_STATE_ACTIVE:
+            return None
+        if state not in {session.pilot_connection, session.driver_connection}:
+            return None
+        return session
 
     async def _end_session(
         self,

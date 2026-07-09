@@ -50,20 +50,35 @@ When checking off a TODO whose task description does not fully describe the impl
 22. [x] Add video-file-backed Mock Robot camera input.
     - [x] Added `VideoFileCamera` source that validates and reads a configured video file in chunks, optionally looping; WebRTC H.264 publishing remains TODO 23.
 23. [ ] Implement driver-to-server WebRTC H.264 media transport.
-24. [ ] Implement client-to-driver WebRTC pilot-input data channel.
-25. [ ] Implement server-to-client WebRTC Splat Batch data channel.
-26. [ ] Add non-trickle WebRTC signaling over the WebSocket control plane.
+    - [ ] Local progress: added server-side WebRTC live-path acceptor seams and PyAV H.264 decoder dependencies, but did not complete driver-side H.264 publishing from ROS/mock camera sources over a real `aiortc` media track.
+24. [x] Implement client-to-driver WebRTC pilot-input data channel.
+    - [x] Added browser non-trickle Pilot Input data-channel offer creation plus driver-side JSON snapshot data-channel decoding into the existing `receive_pilot_input_snapshot()` sink.
+25. [x] Implement server-to-client WebRTC Splat Batch data channel.
+    - [x] Added browser Splat Batch peer negotiation/receiver and server-side Splat Batch data-channel registry for sending encoded binary batches when the server-owned channel opens.
+26. [x] Add non-trickle WebRTC signaling over the WebSocket control plane.
+    - [x] Server validates WebRTC live paths, relays `pilotInput` offers/answers between pilot and driver, and answers server-terminated `cameraMedia`/`splatBatches` offers through an injectable live-path acceptor.
 27. [ ] Record representative USB-webcam reconstruction test sequences.
+    - [ ] Not completed locally: requires physical USB-webcam capture with representative piloting head motion/environments.
 28. [ ] Spike MASt3R-SLAM on the recorded sequences.
+    - [ ] Blocked on TODO 27 recorded sequences and local GPU/research setup.
 29. [ ] Spike MonoGS on the recorded sequences.
+    - [ ] Blocked on TODO 27 recorded sequences and local GPU/research setup.
 30. [ ] Select the v1 monocular reconstruction path.
-31. [ ] Define the server-internal reconstruction processor interface.
+    - [ ] Not selected: MASt3R-SLAM and MonoGS comparison is still pending.
+31. [x] Define the server-internal reconstruction processor interface.
+    - [x] Added `server/processors/base.py` with `ReconstructionFrame`, `GaussianSplat`, `ProcessorSplatBatch`, and `ReconstructionProcessor`.
 32. [ ] Integrate the selected processor under `server/processors/`.
-33. [ ] Implement camera media decoding into reconstruction frames.
-34. [ ] Implement reconstruction failure isolation per session.
+    - [ ] Added `NullReconstructionProcessor` as an integration seam only; no selected v1 algorithm has been integrated.
+33. [x] Implement camera media decoding into reconstruction frames.
+    - [x] Added `H264CameraDecoder` that uses PyAV to decode H.264 samples into RGB `ReconstructionFrame` values for processor ingress.
+34. [x] Implement reconstruction failure isolation per session.
+    - [x] Added `ReconstructionSessionRuntime` that catches processor exceptions, reports `session.ended.reconstruction_failed`, and prevents repeated failures from escaping the affected session.
 35. [ ] Spike Spark.JS Splat Batch insertion on Pico 4.
-36. [ ] Freeze the v1 Splat Batch binary layout.
-37. [ ] Implement server Splat Batch encoding.
+    - [ ] Not completed locally: requires Pico 4 browser/Spark.JS performance testing.
+36. [x] Freeze the v1 Splat Batch binary layout.
+    - [x] Documented the v1 `ITOSPLAT` little-endian binary header and 36-byte splat record layout in `docs/protocol.md`.
+37. [x] Implement server Splat Batch encoding.
+    - [x] Added `server/ito/splat.py` encoder/decoder-header helpers for the v1 binary Splat Batch format.
 38. [x] Scaffold the plain-JavaScript Pilot Client.
     - [x] Added a static A-Frame/WebXR client under `client/` with plain ES modules, no build step, and Node built-in tests.
 39. [x] Implement the browser Enter VR launch surface.

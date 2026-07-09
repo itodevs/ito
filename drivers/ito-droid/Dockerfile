@@ -12,7 +12,9 @@ COPY drivers/ito-droid /app/drivers/ito-droid
 
 RUN pip3 install --no-cache-dir \
     'msgpack>=1.1,<2' \
-    'websockets>=15,<16'
+    'websockets>=15,<16' \
+    'aiortc>=1.9,<2' \
+    'av>=12,<15'
 
 ENV PYTHONPATH=/app:/app/drivers/ito-droid
 

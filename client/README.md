@@ -34,8 +34,9 @@ npm test
 - Pilot-facing text is loaded from `resources/en/default.json` and resolved by
   resource key before falling back to driver/server free text.
 - The Splat Scene is client-owned. `src/splat-scene.js` includes the Spark.JS
-  adapter seam used by the session view; the exact Spark insertion logic remains
-  blocked on the Pico 4 Spark spike and the frozen Splat Batch binary layout.
+  adapter seam and v1 Splat Batch binary header parser. Exact Spark insertion
+  performance still needs Pico 4 validation.
 - Pilot Input Snapshots are generated at the configured rate with headset yaw
-  relative to session start plus current controller state. Actual WebRTC
-  signaling/data-channel attachment remains part of TODO 24-26.
+  relative to session start plus current controller state. `src/webrtc.js`
+  creates non-trickle WebRTC offers for pilot-input and Splat Batch data
+  channels over the WebSocket control plane.

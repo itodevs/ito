@@ -5,8 +5,8 @@ The Mock Robot is Ito's robot-driver test double.
 It speaks the Ito v1 WebSocket control plane as a Robot Driver, reports itself
 to the Robot Catalog, accepts server-owned session lifecycle requests, logs
 Pilot Input Snapshots to stdout, and opens a configured video file as mock
-camera input. WebRTC publishing of that camera input is intentionally left to
-the follow-on WebRTC transport tasks.
+camera input. H.264 WebRTC publishing still requires the shared driver-side
+`aiortc` transport integration and is not exercised by the local unit tests.
 
 ## Configuration
 

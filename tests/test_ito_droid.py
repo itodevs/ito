@@ -11,6 +11,7 @@ from ito_droid.control import CameraPanController
 from ito_droid.driver import ItoDroidDriver
 from ito_droid.media import CameraMediaPublisher
 from ito_droid.ros_io import CameraFrame
+from ito_droid.webrtc import PilotInputDataChannelReceiver, decode_pilot_input_snapshot
 from server.ito.protocol import (
     TYPE_DRIVER_SESSION_START,
     TYPE_DRIVER_SESSION_START_RESULT,
@@ -212,6 +213,39 @@ async def _session_start_fails_without_camera_feed():
 
 def test_clean_session_end_neutralizes_servo_and_stops_media():
     asyncio.run(_clean_session_end_neutralizes_servo_and_stops_media())
+
+
+def test_pilot_input_data_channel_receiver_decodes_snapshot_json():
+    received = []
+
+    class FakeDataChannel:
+        def on(self, event):
+            assert event == "message"
+
+            def register(callback):
+                self.callback = callback
+                return callback
+
+            return register
+
+    channel = FakeDataChannel()
+    receiver = PilotInputDataChannelReceiver(received.append)
+    receiver.attach(channel)
+    channel.callback(
+        b'{"protocolVersion":"ito.v1","sessionId":"session-1","sequence":1,"headsetYawRad":0.25}'
+    )
+
+    assert received == [
+        {
+            "protocolVersion": "ito.v1",
+            "sessionId": "session-1",
+            "sequence": 1,
+            "headsetYawRad": 0.25,
+        }
+    ]
+    assert decode_pilot_input_snapshot(
+        '{"protocolVersion":"ito.v1","sessionId":"session-1","sequence":2,"headsetYawRad":0}'
+    )["sequence"] == 2
 
 
 async def _clean_session_end_neutralizes_servo_and_stops_media():
