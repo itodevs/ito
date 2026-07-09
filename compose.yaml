@@ -20,7 +20,7 @@ services:
     depends_on:
       - ito-server
     volumes:
-      - ./client:/usr/share/nginx/html:ro
+      - ./client:/usr/share/nginx/html:ro,Z
     ports:
       - "8080:80"
 
@@ -38,7 +38,7 @@ services:
       ITO_MOCK_ROBOT_CAMERA_VIDEO: /data/mock-camera.mp4
       ITO_MOCK_ROBOT_CAMERA_LOOP: "true"
     volumes:
-      - ${ITO_MOCK_ROBOT_CAMERA_VIDEO_HOST:-./fixtures/mock-camera.mp4}:/data/mock-camera.mp4:ro
+      - ${ITO_MOCK_ROBOT_CAMERA_VIDEO_HOST:-./fixtures/mock-camera.mp4}:/data/mock-camera.mp4:ro,Z
 
   ito-droid:
     profiles:

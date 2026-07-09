@@ -32,6 +32,10 @@ of `aardvark-dns`/user-bus startup. The Mock Robot reaches the Ito Server throug
 `host.containers.internal:8765`; Docker users can still use the same Compose file
 because the server port is published to the host.
 
+Bind mounts use the `Z` SELinux relabel option so rootless Podman containers can
+read files from the user's home directory. Without this, nginx may return
+`403 Forbidden` even though Unix file permissions look readable.
+
 Open `http://localhost:8080/`. The client defaults to the Ito Server control
 WebSocket at `ws://<page-host>:8765`, which is `ws://localhost:8765` for this
 Compose setup.
