@@ -39,11 +39,16 @@ When checking off a TODO whose task description does not fully describe the impl
     - [x] Pilot `connection.hello` with an active `sessionId` resumes the session and returns Session Configuration; unavailable sessions fail hello with `session.resume_unavailable`. Reconnected drivers are reattached to active sessions for their robot.
 17. [x] Add server tests for catalog, acquisition, lifecycle, and reconnect behavior.
     - [x] Added unit tests for successful acquisition, competing acquisition, start failure, start timeout, session end fan-out, disappeared-endpoint cleanup, and reconnect resume/rejection.
-18. [ ] Scaffold the Mock Robot driver and container.
-19. [ ] Implement Mock Robot status reporting.
-20. [ ] Implement Mock Robot acquisition and session lifecycle handling.
-21. [ ] Implement Mock Robot pilot-input reception and logging.
-22. [ ] Add video-file-backed Mock Robot camera input.
+18. [x] Scaffold the Mock Robot driver and container.
+    - [x] Added `drivers/mock-robot` Python package, entrypoint, requirements, Dockerfile, and README run/build instructions.
+19. [x] Implement Mock Robot status reporting.
+    - [x] Mock Robot sends v1 MessagePack `connection.hello` and periodic `robot.status`; it reports Unavailable until `ITO_MOCK_ROBOT_CAMERA_VIDEO` is configured.
+20. [x] Implement Mock Robot acquisition and session lifecycle handling.
+    - [x] Handles `driver.session.start`, `session.end`, and `session.ended`, tracks one active server-owned session, opens/closes mock camera input, and sends standard result payloads.
+21. [x] Implement Mock Robot pilot-input reception and logging.
+    - [x] Added `receive_pilot_input_snapshot()` as the driver-side receive/log sink for TODO 24's WebRTC data-channel transport; snapshots are JSON-logged to stdout and no fake robot pose is maintained.
+22. [x] Add video-file-backed Mock Robot camera input.
+    - [x] Added `VideoFileCamera` source that validates and reads a configured video file in chunks, optionally looping; WebRTC H.264 publishing remains TODO 23.
 23. [ ] Implement driver-to-server WebRTC H.264 media transport.
 24. [ ] Implement client-to-driver WebRTC pilot-input data channel.
 25. [ ] Implement server-to-client WebRTC Splat Batch data channel.
