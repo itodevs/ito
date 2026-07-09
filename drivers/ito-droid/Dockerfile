@@ -1,4 +1,4 @@
-FROM ros:humble-ros-base
+FROM docker.io/library/ros:humble-ros-base
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
@@ -14,7 +14,7 @@ RUN pip3 install --no-cache-dir \
     'msgpack>=1.1,<2' \
     'websockets>=15,<16' \
     'aiortc>=1.9,<2' \
-    'av>=12,<15'
+    'av>=16,<17'
 
 ENV PYTHONPATH=/app:/app/drivers/ito-droid
 
