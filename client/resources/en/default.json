@@ -1,0 +1,88 @@
+{
+  "app": {
+    "title": "Ito Pilot",
+    "enterVr": "Enter VR",
+    "webxrUnavailable": "Immersive VR is not available in this browser.",
+    "loading": "Loading..."
+  },
+  "catalog": {
+    "title": "Robot Catalog",
+    "refresh": "Refresh",
+    "empty": "No robots are reporting yet.",
+    "acquire": "Pilot",
+    "unavailable": "Unavailable"
+  },
+  "connection": {
+    "connecting": "Connecting...",
+    "connected": "Connected",
+    "failed": "Connection failed"
+  },
+  "session": {
+    "connecting": "Connecting to {{name}}...",
+    "active": "Piloting {{name}}",
+    "ending": "Ending session...",
+    "ended": "Session ended",
+    "returnToCatalog": "Return to Catalog",
+    "visualPaused": "Visual feed lost. Robot controls paused.",
+    "menu": "Menu",
+    "resume": "Resume",
+    "end": "End Session",
+    "settings": "Settings"
+  },
+  "settings": {
+    "title": "Settings",
+    "serverUrl": "Server",
+    "visualFreshnessTimeoutMs": "Visual timeout",
+    "pilotInputRateHz": "Input rate",
+    "splatBudget": "Splat budget",
+    "splatLifetimeMs": "Splat lifetime",
+    "save": "Save",
+    "reset": "Reset"
+  },
+  "enum": {
+    "robotType": {
+      "Mecha": "Mecha",
+      "Android Robot": "Android Robot",
+      "Droid": "Droid",
+      "Drone": "Drone",
+      "Car": "Car",
+      "Plane": "Plane"
+    },
+    "robotStatus": {
+      "Available": "Available",
+      "Occupied": "Occupied",
+      "Unavailable": "Unavailable"
+    }
+  },
+  "reason": {
+    "unknown": "Unknown reason.",
+    "request": {
+      "timeout": "The request timed out."
+    },
+    "robot": {
+      "unavailable": "The robot is unavailable.",
+      "driver_disconnected": "The robot driver disconnected.",
+      "driver_status_timeout": "The robot stopped reporting status."
+    },
+    "session": {
+      "acquire": {
+        "robot_unavailable": "That robot is not available."
+      },
+      "ended": {
+        "requested": "The session was ended.",
+        "pilot_requested": "The pilot ended the session.",
+        "endpoint_disappeared": "A required endpoint disconnected.",
+        "reconstruction_failed": "Reconstruction failed."
+      },
+      "resume_unavailable": "The previous session can no longer be resumed."
+    },
+    "connection": {
+      "hello_required": "The server rejected the connection handshake.",
+      "invalid_role": "The server rejected the client role."
+    },
+    "protocol": {
+      "invalid_message": "The server rejected an invalid protocol message.",
+      "version_mismatch": "The Ito protocol versions do not match."
+    }
+  }
+}

@@ -64,19 +64,32 @@ When checking off a TODO whose task description does not fully describe the impl
 35. [ ] Spike Spark.JS Splat Batch insertion on Pico 4.
 36. [ ] Freeze the v1 Splat Batch binary layout.
 37. [ ] Implement server Splat Batch encoding.
-38. [ ] Scaffold the plain-JavaScript Pilot Client.
-39. [ ] Implement the browser Enter VR launch surface.
-40. [ ] Implement client configuration defaults and Local Storage settings.
-41. [ ] Add pilot-facing text resource loading.
-42. [ ] Implement in-VR controller-ray UI foundations.
-43. [ ] Implement the in-VR Robot Catalog.
-44. [ ] Implement acquisition and connecting states in VR.
-45. [ ] Implement session view with Spark.JS Splat Scene ownership.
-46. [ ] Implement Splat Lifetime and Splat Budget eviction.
-47. [ ] Implement headset-yaw Pilot Input Snapshots.
-48. [ ] Implement client visual-freshness timeout behavior.
-49. [ ] Implement in-VR menu pause and session end action.
-50. [ ] Implement session-ended popup and return-to-catalog flow.
+38. [x] Scaffold the plain-JavaScript Pilot Client.
+    - [x] Added a static A-Frame/WebXR client under `client/` with plain ES modules, no build step, and Node built-in tests.
+39. [x] Implement the browser Enter VR launch surface.
+    - [x] Added a minimal non-VR launch page whose primary action calls `a-scene.enterVR()` from a user gesture.
+40. [x] Implement client configuration defaults and Local Storage settings.
+    - [x] Added defaults for server URL, request timeout, visual-freshness timeout, Pilot Input Rate, Splat Budget, and Splat Lifetime persisted under `ito.pilotClient.settings.v1`.
+41. [x] Add pilot-facing text resource loading.
+    - [x] Added `resources/en/default.json` with i18next-style nested keys and resource-key/free-text Display Reason fallback.
+42. [x] Implement in-VR controller-ray UI foundations.
+    - [x] Added A-Frame laser controller raycasters, clickable VR button entities, and reusable panel/button/label helpers.
+43. [x] Implement the in-VR Robot Catalog.
+    - [x] Added MessagePack WebSocket `connection.hello` and `catalog.get` handling with localized robot type/status labels and refresh.
+44. [x] Implement acquisition and connecting states in VR.
+    - [x] Added `session.acquire` flow with an in-VR connecting panel, disabled duplicate controls, and Display Reason fallback on failure.
+45. [x] Implement session view with Spark.JS Splat Scene ownership.
+    - [x] Added a client-owned `SplatSceneOwner` and `SparkJsSplatAdapter` seam. Actual Spark insertion remains intentionally isolated behind the adapter because TODO 35-37 have not frozen the Pico 4 insertion path or binary layout.
+46. [x] Implement Splat Lifetime and Splat Budget eviction.
+    - [x] Added age-based and oldest-first budget eviction on the client-owned batch registry.
+47. [x] Implement headset-yaw Pilot Input Snapshots.
+    - [x] Added relative headset-yaw snapshot generation with full controller button/axis state and a data-channel transport seam; actual WebRTC attachment remains covered by TODO 24-26.
+48. [x] Implement client visual-freshness timeout behavior.
+    - [x] Added timeout tracking from the last normal splat apply path; stale visuals freeze the Splat Scene and withhold pilot input while keeping VR UI active.
+49. [x] Implement in-VR menu pause and session end action.
+    - [x] Added controller/menu-button pause behavior that withholds pilot input, plus clean `session.end` request from the in-VR menu.
+50. [x] Implement session-ended popup and return-to-catalog flow.
+    - [x] Added `session.ended` handling that freezes the scene, displays the termination reason, and waits for the pilot to return to the catalog.
 51. [ ] Verify the client on Pico 4's built-in browser.
 52. [ ] Scaffold the Ito Droid ROS driver and container.
 53. [ ] Implement Ito Droid environment-based configuration.
