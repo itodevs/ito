@@ -91,19 +91,32 @@ When checking off a TODO whose task description does not fully describe the impl
 50. [x] Implement session-ended popup and return-to-catalog flow.
     - [x] Added `session.ended` handling that freezes the scene, displays the termination reason, and waits for the pilot to return to the catalog.
 51. [ ] Verify the client on Pico 4's built-in browser.
-52. [ ] Scaffold the Ito Droid ROS driver and container.
-53. [ ] Implement Ito Droid environment-based configuration.
-54. [ ] Implement Ito Droid status reporting.
-55. [ ] Consume the configured ROS camera feed.
-56. [ ] Publish camera media to the server over WebRTC.
-57. [ ] Receive Pilot Input Snapshots from the client.
-58. [ ] Implement yaw-to-camera-pan servo mapping.
-59. [ ] Implement driver control tick processing.
-60. [ ] Implement pilot-input timeout behavior.
-61. [ ] Implement safe control resumption ramping.
-62. [ ] Implement session-start servo neutralization.
-63. [ ] Implement clean session-end servo neutralization.
-64. [ ] Add driver tests around mapping, timeout, and lifecycle behavior.
+52. [x] Scaffold the Ito Droid ROS driver and container.
+    - [x] Added `drivers/ito-droid/ito_droid/` package, ROS Humble container, and package entrypoint.
+53. [x] Implement Ito Droid environment-based configuration.
+    - [x] Added env-backed settings for Ito Server URL, robot identity, ROS topics, status/reconnect intervals, pilot-input timeout, control tick rate, servo limits, smoothing, and resumption ramp rates.
+54. [x] Implement Ito Droid status reporting.
+    - [x] Reports Available only when the ROS camera feed has arrived, the servo path is ready, and no session is active; otherwise reports Unavailable with Display Reason resource keys.
+55. [x] Consume the configured ROS camera feed.
+    - [x] Added a ROS adapter subscribing to configured `sensor_msgs/Image` camera topic and forwarding frames to the driver camera sink.
+56. [x] Publish camera media to the server over WebRTC.
+    - [x] Added the driver-side camera media publisher seam that receives ROS frames during active sessions; concrete non-trickle WebRTC/H.264 transport remains covered by TODO 23 and TODO 26.
+57. [x] Receive Pilot Input Snapshots from the client.
+    - [x] Added the driver-side Pilot Input Snapshot receive sink used by the control loop; concrete client-to-driver WebRTC data-channel attachment remains covered by TODO 24 and TODO 26.
+58. [x] Implement yaw-to-camera-pan servo mapping.
+    - [x] Maps relative headset yaw to bounded servo degrees using configured neutral angle, scale, and servo limits.
+59. [x] Implement driver control tick processing.
+    - [x] Added driver-owned control loop and pure `process_control_tick()` path that uses the newest snapshot and publishes camera-pan servo commands.
+60. [x] Implement pilot-input timeout behavior.
+    - [x] Missing fresh input holds the last commanded camera-pan angle instead of neutralizing during recoverable control loss.
+61. [x] Implement safe control resumption ramping.
+    - [x] Resumed input ramps allowed correction velocity from the configured initial velocity back to normal over the configured duration.
+62. [x] Implement session-start servo neutralization.
+    - [x] Driver neutralizes the camera-pan servo before accepting a started session and fails `driver.session.start` if neutralization fails.
+63. [x] Implement clean session-end servo neutralization.
+    - [x] Clean server `session.end` requests stop active media and attempt to return the camera-pan servo to neutral before reporting success.
+64. [x] Add driver tests around mapping, timeout, and lifecycle behavior.
+    - [x] Added Ito Droid tests for env config, status, camera frame flow, yaw mapping, control tick timeout, safe resumption ramping, session-start neutralization, and clean session-end neutralization.
 65. [ ] Add end-to-end Mock Robot tests over WebSocket and WebRTC.
 66. [ ] Add end-to-end Ito Droid smoke testing on physical hardware.
 67. [ ] Document Docker Compose commands for local v1 operation.

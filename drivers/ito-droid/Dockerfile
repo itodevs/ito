@@ -1,17 +1,19 @@
-FROM python:3
+FROM ros:humble-ros-base
 
-RUN apt-get update && apt-get install -y \
-    libgl1 \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender1 \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-pip \
+    ros-humble-sensor-msgs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir opencv-python python-dotenv
+COPY server /app/server
+COPY drivers/ito-droid /app/drivers/ito-droid
 
-COPY main.py .
+RUN pip3 install --no-cache-dir \
+    'msgpack>=1.1,<2' \
+    'websockets>=15,<16'
 
-CMD ["python", "main.py"]
+ENV PYTHONPATH=/app:/app/drivers/ito-droid
+
+CMD ["python3", "/app/drivers/ito-droid/main.py"]
