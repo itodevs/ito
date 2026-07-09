@@ -50,7 +50,11 @@ When checking off a TODO whose task description does not fully describe the impl
 22. [x] Add video-file-backed Mock Robot camera input.
     - [x] Added `VideoFileCamera` source that validates and reads a configured video file in chunks, optionally looping; WebRTC H.264 publishing remains TODO 23.
 23. [ ] Implement driver-to-server WebRTC H.264 media transport.
-    - [ ] Local progress: added server-side WebRTC live-path acceptor seams and PyAV H.264 decoder dependencies, but did not complete driver-side H.264 publishing from ROS/mock camera sources over a real `aiortc` media track.
+    - [ ] Local progress: server-side camera media receive and Mock Robot video-file publishing are locally wired; Ito Droid ROS-frame-to-H.264 WebRTC publishing and physical camera verification remain incomplete.
+    - [x] Added server-side `cameraMedia` aiortc track consumption into session-scoped reconstruction frames, using the existing reconstruction runtime and Null processor seam until a v1 processor is selected.
+    - [x] Added Mock Robot video-file `cameraMedia` publishing over aiortc `MediaPlayer`, with H.264 codec preference, non-trickle offer/answer signaling, and session cleanup.
+    - [x] Extended the Mock Robot local e2e test to assert that `cameraMedia` delivers a decoded frame to server reconstruction when aiortc/PyAV/FFmpeg H.264 support are installed; the test skips clearly when those optional dependencies are unavailable.
+    - [ ] Remaining: wire Ito Droid ROS camera frames into concrete H.264 WebRTC publishing and verify against physical camera hardware.
 24. [x] Implement client-to-driver WebRTC pilot-input data channel.
     - [x] Added browser non-trickle Pilot Input data-channel offer creation plus driver-side JSON snapshot data-channel decoding into the existing `receive_pilot_input_snapshot()` sink.
 25. [x] Implement server-to-client WebRTC Splat Batch data channel.

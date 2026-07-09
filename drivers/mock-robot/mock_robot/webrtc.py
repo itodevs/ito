@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
 LOGGER = logging.getLogger(__name__)
@@ -55,6 +56,80 @@ class PilotInputWebRtcReceiver:
         peer_connections = list(self._peer_connections.values())
         self._peer_connections.clear()
         await asyncio.gather(*(pc.close() for pc in peer_connections), return_exceptions=True)
+
+
+class CameraMediaWebRtcPublisher:
+    """Publishes a video file to the server over the `cameraMedia` WebRTC path."""
+
+    def __init__(self) -> None:
+        try:
+            from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription
+            from aiortc.contrib.media import MediaPlayer
+        except ImportError as exc:  # pragma: no cover - declared runtime dependency
+            raise RuntimeError("aiortc is required for Mock Robot camera media") from exc
+        self._configuration_type = RTCConfiguration
+        self._peer_connection_type = RTCPeerConnection
+        self._session_description_type = RTCSessionDescription
+        self._media_player_type = MediaPlayer
+        self._peer_connections: dict[str, Any] = {}
+        self._players: dict[str, Any] = {}
+
+    async def create_offer(self, *, session_id: str, video_path: str | Path, loop: bool) -> str:
+        pc = self._peer_connection_type(configuration=self._configuration_type(iceServers=[]))
+        player = self._media_player_type(str(video_path), loop=loop)
+        if player.video is None:
+            await pc.close()
+            raise RuntimeError(f"mock camera video has no video stream: {video_path}")
+        pc.addTrack(player.video)
+        self._prefer_h264(pc)
+        self._peer_connections[session_id] = pc
+        self._players[session_id] = player
+        offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
+        await _wait_for_ice_gathering_complete(pc)
+        return pc.localDescription.sdp
+
+    async def accept_answer(self, *, session_id: str, sdp: str) -> None:
+        pc = self._peer_connections.get(session_id)
+        if pc is None:
+            raise RuntimeError(f"no cameraMedia peer connection for session {session_id}")
+        await pc.setRemoteDescription(self._session_description_type(sdp=sdp, type="answer"))
+
+    async def close_session(self, session_id: str | None) -> None:
+        if session_id is None:
+            return
+        pc = self._peer_connections.pop(session_id, None)
+        player = self._players.pop(session_id, None)
+        if player is not None and player.video is not None:
+            player.video.stop()
+        if pc is not None:
+            await pc.close()
+
+    async def close_all(self) -> None:
+        peer_connections = list(self._peer_connections.values())
+        players = list(self._players.values())
+        self._peer_connections.clear()
+        self._players.clear()
+        for player in players:
+            if player.video is not None:
+                player.video.stop()
+        await asyncio.gather(*(pc.close() for pc in peer_connections), return_exceptions=True)
+
+    def _prefer_h264(self, pc: Any) -> None:
+        try:
+            from aiortc import RTCRtpSender
+        except ImportError:  # pragma: no cover - already imported in __init__
+            return
+        codecs = [
+            codec
+            for codec in RTCRtpSender.getCapabilities("video").codecs
+            if codec.mimeType.lower() == "video/h264"
+        ]
+        if not codecs:
+            return
+        for transceiver in pc.getTransceivers():
+            if transceiver.kind == "video":
+                transceiver.setCodecPreferences(codecs)
 
 
 def decode_pilot_input_snapshot(message: str | bytes) -> dict[str, Any]:

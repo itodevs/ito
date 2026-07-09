@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import Iterable
@@ -42,3 +44,40 @@ class H264CameraDecoder:
                 pixel_format="rgb24",
                 sequence=self._sequence,
             )
+
+
+class AiortcCameraTrackReceiver:
+    """Consumes an aiortc video track into reconstruction frames."""
+
+    def __init__(self, process_frame: Callable[[ReconstructionFrame], None]) -> None:
+        self.process_frame = process_frame
+        self._sequence = 0
+
+    async def consume(self, track: object) -> None:
+        try:
+            from aiortc.mediastreams import MediaStreamError
+        except ImportError as exc:  # pragma: no cover - optional media stack
+            raise RuntimeError("aiortc is required for camera media receiving") from exc
+
+        while True:
+            try:
+                frame = await track.recv()
+            except MediaStreamError:
+                return
+            self.process_frame(self._reconstruction_frame(frame))
+            await asyncio.sleep(0)
+
+    def _reconstruction_frame(self, frame: object) -> ReconstructionFrame:
+        rgb = frame.to_rgb()
+        self._sequence += 1
+        timestamp_ms = 0
+        if getattr(frame, "pts", None) is not None and getattr(frame, "time_base", None) is not None:
+            timestamp_ms = int(float(frame.pts * frame.time_base) * 1000)
+        return ReconstructionFrame(
+            data=bytes(rgb.planes[0]),
+            timestamp_ms=timestamp_ms,
+            width=rgb.width,
+            height=rgb.height,
+            pixel_format="rgb24",
+            sequence=self._sequence,
+        )

@@ -25,6 +25,7 @@ from server.ito.protocol import (
     TYPE_SESSION_ENDED,
     TYPE_WEBRTC_ANSWER,
     TYPE_WEBRTC_OFFER,
+    WEBRTC_PATH_CAMERA_MEDIA,
     WEBRTC_PATH_PILOT_INPUT,
     DisplayReason,
     make_envelope,
@@ -36,7 +37,7 @@ from server.ito.protocol import (
 
 from .camera import VideoFileCamera
 from .config import MockRobotConfig
-from .webrtc import PilotInputWebRtcReceiver
+from .webrtc import CameraMediaWebRtcPublisher, PilotInputWebRtcReceiver
 
 LOGGER = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ LOGGER = logging.getLogger(__name__)
 class MockRobotDriver:
     """A robot-driver test double that speaks Ito v1 control-plane messages."""
 
-    def __init__(self, config: MockRobotConfig) -> None:
+    def __init__(self, config: MockRobotConfig, *, camera_media_webrtc: Any | None = None) -> None:
         self.config = config
         self.session_id: str | None = None
         self.session_config: dict[str, object] | None = None
@@ -58,6 +59,7 @@ class MockRobotDriver:
             else None
         )
         self.pilot_input_webrtc: PilotInputWebRtcReceiver | None = None
+        self.camera_media_webrtc = camera_media_webrtc
 
     @property
     def available(self) -> bool:
@@ -142,6 +144,8 @@ class MockRobotDriver:
             await self._clear_session()
         elif message_type == TYPE_WEBRTC_OFFER:
             await self.handle_webrtc_offer(websocket, envelope)
+        elif message_type == TYPE_WEBRTC_ANSWER:
+            await self.handle_webrtc_answer(envelope)
         else:
             LOGGER.info("Mock Robot ignoring unsupported message type %s", message_type)
 
@@ -192,6 +196,7 @@ class MockRobotDriver:
             envelope,
             result_ok({"sessionId": self.session_id}),
         )
+        await self._start_camera_media(websocket)
 
     async def handle_session_end(self, websocket: Any, envelope: Mapping[str, Any]) -> None:
         ended_session_id = envelope.get("sessionId") or self.session_id
@@ -232,6 +237,45 @@ class MockRobotDriver:
             )
         )
 
+    async def handle_webrtc_answer(self, envelope: Mapping[str, Any]) -> None:
+        if envelope["payload"].get("path") != WEBRTC_PATH_CAMERA_MEDIA:
+            LOGGER.info("Mock Robot ignoring unsupported WebRTC answer path %s", envelope["payload"].get("path"))
+            return
+        session_id = envelope.get("sessionId") or self.session_id
+        sdp = envelope["payload"].get("sdp")
+        if not isinstance(session_id, str) or not isinstance(sdp, str):
+            LOGGER.warning("Mock Robot ignoring invalid camera-media WebRTC answer")
+            return
+        if self.camera_media_webrtc is None:
+            LOGGER.warning("Mock Robot received camera-media answer without an active publisher")
+            return
+        await self.camera_media_webrtc.accept_answer(session_id=session_id, sdp=sdp)
+
+    async def _start_camera_media(self, websocket: Any) -> None:
+        if self.session_id is None or self.camera is None:
+            return
+        try:
+            if self.camera_media_webrtc is None:
+                self.camera_media_webrtc = CameraMediaWebRtcPublisher()
+            sdp = await self.camera_media_webrtc.create_offer(
+                session_id=self.session_id,
+                video_path=self.camera.path,
+                loop=self.camera.loop,
+            )
+        except Exception as exc:
+            LOGGER.error("Mock Robot failed to start cameraMedia WebRTC: %s", exc)
+            return
+        await websocket.send(
+            pack_envelope(
+                make_envelope(
+                    TYPE_WEBRTC_OFFER,
+                    {"path": WEBRTC_PATH_CAMERA_MEDIA, "sdp": sdp},
+                    robot_id=self.config.robot_id,
+                    session_id=self.session_id,
+                )
+            )
+        )
+
     def receive_pilot_input_snapshot(self, snapshot: Mapping[str, Any]) -> None:
         """Receive and log a Pilot Input Snapshot.
 
@@ -267,6 +311,8 @@ class MockRobotDriver:
             self.camera.close()
         if self.pilot_input_webrtc is not None:
             await self.pilot_input_webrtc.close_session(session_id)
+        if self.camera_media_webrtc is not None:
+            await self.camera_media_webrtc.close_session(session_id)
         self.session_id = None
         self.session_config = None
 

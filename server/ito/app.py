@@ -13,6 +13,7 @@ from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
 from .config import ServerConfig
+from .media import AiortcCameraTrackReceiver
 from .protocol import (
     DisplayReason,
     PROTOCOL_VERSION,
@@ -47,7 +48,9 @@ from .protocol import (
     result_ok,
     unpack_envelope,
 )
+from .reconstruction import ReconstructionSessionRuntime
 from .webrtc import MissingWebRtcStack, ServerLivePathAcceptor, SplatBatchChannelRegistry
+from server.processors.null import NullReconstructionProcessor
 
 LOGGER = logging.getLogger(__name__)
 
@@ -135,9 +138,11 @@ class ItoServer:
         self._pending_webrtc_routes: dict[str, tuple[ConnectionState, str]] = {}
         self.splat_channels = SplatBatchChannelRegistry()
         self.live_paths: ServerLivePathAcceptor = MissingWebRtcStack()
+        self.reconstruction_runtimes: dict[str, ReconstructionSessionRuntime] = {}
         self._acquisition_lock = asyncio.Lock()
         self._watchdog_task: asyncio.Task[None] | None = None
         self._cleanup_task: asyncio.Task[None] | None = None
+        self._install_default_live_paths()
 
     @property
     def watchdog_seconds(self) -> float:
@@ -150,6 +155,54 @@ class ItoServer:
     @property
     def session_cleanup_seconds(self) -> float:
         return self.config.session_cleanup_timeout_ms / 1000
+
+    def _install_default_live_paths(self) -> None:
+        try:
+            from .webrtc import AiortcServerLivePaths
+        except ImportError:  # pragma: no cover - module is local
+            return
+        try:
+            self.live_paths = AiortcServerLivePaths(
+                on_camera_track=self._accept_camera_track,
+                splat_channels=self.splat_channels,
+            )
+        except RuntimeError:
+            self.live_paths = MissingWebRtcStack()
+
+    def _accept_camera_track(self, track: object, session_id: str) -> None:
+        if getattr(track, "kind", None) != "video":
+            return
+        runtime = self._reconstruction_runtime(session_id)
+        receiver = AiortcCameraTrackReceiver(runtime.process_frame)
+        asyncio.create_task(receiver.consume(track))
+
+    def _reconstruction_runtime(self, session_id: str) -> ReconstructionSessionRuntime:
+        runtime = self.reconstruction_runtimes.get(session_id)
+        if runtime is not None:
+            return runtime
+        runtime = ReconstructionSessionRuntime(
+            session_id,
+            NullReconstructionProcessor(),
+            send_splat_batch=lambda payload: self.splat_channels.send(session_id, payload),
+            fail_session=lambda reason: asyncio.create_task(
+                self._fail_session_from_reconstruction(session_id, reason)
+            ),
+        )
+        runtime.start()
+        self.reconstruction_runtimes[session_id] = runtime
+        return runtime
+
+    async def _fail_session_from_reconstruction(self, session_id: str, reason: dict[str, str]) -> None:
+        session = self.sessions.get(session_id)
+        if session is None or session.state == SESSION_STATE_ENDED:
+            return
+        await self._end_session(
+            session,
+            reason=reason,
+            ended_by="server",
+            clean=False,
+            request_driver_end=True,
+        )
 
     async def serve_forever(self) -> None:
         LOGGER.info("Starting Ito Server on %s:%s", self.config.host, self.config.port)
@@ -561,6 +614,12 @@ class ItoServer:
             session.pilot_connection.session_id = None
         if session.driver_connection and session.driver_connection.session_id == session.session_id:
             session.driver_connection.session_id = None
+        runtime = self.reconstruction_runtimes.pop(session.session_id, None)
+        if runtime is not None:
+            runtime.close()
+        close_session = getattr(self.live_paths, "close_session", None)
+        if close_session is not None:
+            await close_session(session.session_id)
 
         if request_driver_end and session.driver_connection is not None:
             await self._send_driver_session_end(session, reason, clean)

@@ -14,6 +14,7 @@ from server.ito.protocol import (
     unpack_envelope,
 )
 from server.ito.reconstruction import ReconstructionSessionRuntime
+from server.ito.media import AiortcCameraTrackReceiver
 from server.ito.splat import decode_splat_batch_header, encode_splat_batch
 from server.ito.webrtc import SplatBatchChannelRegistry
 from server.processors.base import GaussianSplat, ProcessorSplatBatch, ReconstructionFrame
@@ -196,6 +197,34 @@ def test_reconstruction_failure_is_reported_without_raising():
     runtime.process_frame(ReconstructionFrame(b"rgb", 2, 1, 1))
 
     assert failures == [{"code": "session.ended.reconstruction_failed"}]
+
+
+def test_aiortc_camera_track_receiver_converts_video_frames_to_reconstruction_frames():
+    class Plane:
+        def __bytes__(self):
+            return b"rgb"
+
+    class Frame:
+        pts = 2
+        time_base = 0.5
+        width = 1
+        height = 1
+        planes = [Plane()]
+
+        def to_rgb(self):
+            return self
+
+    frames = []
+    receiver = AiortcCameraTrackReceiver(frames.append)
+
+    frame = receiver._reconstruction_frame(Frame())
+
+    assert frame.data == b"rgb"
+    assert frame.timestamp_ms == 1000
+    assert frame.width == 1
+    assert frame.height == 1
+    assert frame.pixel_format == "rgb24"
+    assert frame.sequence == 1
 
 
 def test_splat_batch_channel_registry_sends_only_when_open():

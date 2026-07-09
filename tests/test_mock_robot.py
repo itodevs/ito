@@ -16,6 +16,8 @@ from server.ito.protocol import (
     TYPE_DRIVER_SESSION_START_RESULT,
     TYPE_SESSION_END,
     TYPE_SESSION_END_RESULT,
+    TYPE_WEBRTC_OFFER,
+    WEBRTC_PATH_CAMERA_MEDIA,
     make_envelope,
     unpack_envelope,
 )
@@ -27,6 +29,23 @@ class FakeWebSocket:
 
     async def send(self, frame):
         self.sent.append(unpack_envelope(frame))
+
+
+class FakeCameraMediaPublisher:
+    def __init__(self):
+        self.offers = []
+        self.answers = []
+        self.closed = []
+
+    async def create_offer(self, *, session_id, video_path, loop):
+        self.offers.append({"sessionId": session_id, "videoPath": str(video_path), "loop": loop})
+        return "fake-camera-offer"
+
+    async def accept_answer(self, *, session_id, sdp):
+        self.answers.append({"sessionId": session_id, "sdp": sdp})
+
+    async def close_session(self, session_id):
+        self.closed.append(session_id)
 
 
 def test_mock_robot_imports_without_websocket_side_effects():
@@ -66,7 +85,11 @@ def test_session_lifecycle_opens_and_closes_camera(tmp_path):
 async def _session_lifecycle_opens_and_closes_camera(tmp_path):
     video = tmp_path / "camera.h264"
     video.write_bytes(b"frame-data")
-    driver = MockRobotDriver(MockRobotConfig(camera_video_path=str(video)))
+    publisher = FakeCameraMediaPublisher()
+    driver = MockRobotDriver(
+        MockRobotConfig(camera_video_path=str(video), camera_loop=False),
+        camera_media_webrtc=publisher,
+    )
     websocket = FakeWebSocket()
 
     await driver.handle_session_start(
@@ -83,9 +106,13 @@ async def _session_lifecycle_opens_and_closes_camera(tmp_path):
     assert driver.session_id == "session-1"
     assert driver.camera is not None
     assert driver.camera.is_open
-    assert websocket.sent[-1]["type"] == TYPE_DRIVER_SESSION_START_RESULT
-    assert websocket.sent[-1]["replyToMessageId"] == "start-1"
-    assert websocket.sent[-1]["payload"] == {"ok": True, "value": {"sessionId": "session-1"}}
+    assert websocket.sent[-2]["type"] == TYPE_DRIVER_SESSION_START_RESULT
+    assert websocket.sent[-2]["replyToMessageId"] == "start-1"
+    assert websocket.sent[-2]["payload"] == {"ok": True, "value": {"sessionId": "session-1"}}
+    assert websocket.sent[-1]["type"] == TYPE_WEBRTC_OFFER
+    assert websocket.sent[-1]["payload"]["path"] == WEBRTC_PATH_CAMERA_MEDIA
+    assert websocket.sent[-1]["payload"]["sdp"] == "fake-camera-offer"
+    assert publisher.offers == [{"sessionId": "session-1", "videoPath": str(video), "loop": False}]
 
     await driver.handle_session_end(
         websocket,
@@ -102,6 +129,7 @@ async def _session_lifecycle_opens_and_closes_camera(tmp_path):
     assert not driver.camera.is_open
     assert websocket.sent[-1]["type"] == TYPE_SESSION_END_RESULT
     assert websocket.sent[-1]["payload"] == {"ok": True, "value": {"sessionId": "session-1"}}
+    assert publisher.closed == ["session-1"]
 
 
 def test_session_start_fails_without_camera_video():

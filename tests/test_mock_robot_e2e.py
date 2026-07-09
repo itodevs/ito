@@ -10,6 +10,7 @@ from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 
 aiortc = pytest.importorskip("aiortc")
+av = pytest.importorskip("av")
 RTCConfiguration = aiortc.RTCConfiguration
 RTCPeerConnection = aiortc.RTCPeerConnection
 RTCSessionDescription = aiortc.RTCSessionDescription
@@ -45,8 +46,8 @@ def test_mock_robot_e2e_acquire_and_pilot_input_over_websocket_and_webrtc(tmp_pa
 
 
 async def _mock_robot_e2e_acquire_and_pilot_input_over_websocket_and_webrtc(tmp_path, caplog):
-    video = tmp_path / "camera.h264"
-    video.write_bytes(b"fake h264 bytes")
+    video = tmp_path / "camera.mp4"
+    _write_h264_sample_video(video)
     server = ItoServer(
         ServerConfig(
             host="127.0.0.1",
@@ -98,6 +99,7 @@ async def _mock_robot_e2e_acquire_and_pilot_input_over_websocket_and_webrtc(tmp_
                     acquired = await _recv_type(pilot_ws, TYPE_SESSION_ACQUIRE_RESULT, "acquire-mock")
                     assert acquired["payload"]["ok"] is True
                     session_id = acquired["payload"]["value"]["sessionId"]
+                    await _wait_for_camera_frame(server, session_id)
 
                     data_channel = peer_connection.createDataChannel(
                         "ito.pilotInput",
@@ -211,3 +213,34 @@ async def _wait_for_log(caplog, text):
             return
         await asyncio.sleep(0.05)
     raise AssertionError(f"Did not find log text: {text}")
+
+
+def _write_h264_sample_video(path):
+    try:
+        container = av.open(str(path), mode="w")
+        stream = container.add_stream("libx264", rate=5)
+        stream.width = 16
+        stream.height = 16
+        stream.pix_fmt = "yuv420p"
+        for index in range(3):
+            frame = av.VideoFrame(16, 16, "yuv420p")
+            frame.planes[0].update(bytes([32 + index * 20]) * frame.planes[0].buffer_size)
+            frame.planes[1].update(bytes([128]) * frame.planes[1].buffer_size)
+            frame.planes[2].update(bytes([128]) * frame.planes[2].buffer_size)
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+        container.close()
+    except Exception as exc:
+        pytest.skip(f"local PyAV/FFmpeg cannot create an H.264 sample video: {exc}")
+
+
+async def _wait_for_camera_frame(server, session_id):
+    for _ in range(80):
+        runtime = server.reconstruction_runtimes.get(session_id)
+        processor = getattr(runtime, "processor", None)
+        if getattr(processor, "frame_count", 0) > 0:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError("cameraMedia did not deliver a decoded frame to reconstruction")

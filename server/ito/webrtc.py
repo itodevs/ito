@@ -96,6 +96,18 @@ class AiortcServerLivePaths:
         await _wait_for_ice_gathering_complete(pc)
         return pc.localDescription.sdp
 
+    async def close_session(self, session_id: str) -> None:
+        import asyncio
+
+        peers = [
+            self.peer_connections.pop(key)
+            for key in list(self.peer_connections)
+            if key[0] == session_id
+        ]
+        if self.splat_channels is not None:
+            self.splat_channels.detach(session_id)
+        await asyncio.gather(*(pc.close() for pc in peers), return_exceptions=True)
+
 
 async def _wait_for_ice_gathering_complete(peer_connection: object) -> None:
     if getattr(peer_connection, "iceGatheringState", None) == "complete":
