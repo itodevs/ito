@@ -31,7 +31,7 @@ services:
     depends_on:
       - ito-server
     environment:
-      ITO_SERVER_URL: ws://ito-server:8765
+      ITO_SERVER_URL: ws://host.containers.internal:8765
       ITO_MOCK_ROBOT_ID: mock-robot-1
       ITO_MOCK_ROBOT_NAME: Mock Robot
       ITO_MOCK_ROBOT_STATUS_INTERVAL_MS: "1000"
@@ -53,3 +53,8 @@ services:
       ITO_DROID_NAME: ${ITO_DROID_NAME:-Ito Droid}
       ITO_DROID_ROS_CAMERA_TOPIC: ${ITO_DROID_ROS_CAMERA_TOPIC:-/image_raw}
       ITO_DROID_ROS_SERVO_COMMAND_TOPIC: ${ITO_DROID_ROS_SERVO_COMMAND_TOPIC:-/ito_droid/camera_pan/command}
+
+networks:
+  default:
+    name: podman
+    external: true

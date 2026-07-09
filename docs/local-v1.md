@@ -1,6 +1,6 @@
 # Local v1 Operation
 
-This guide covers local Ito v1 operation with Docker Compose. It keeps the
+This guide covers local Ito v1 operation with Docker Compose or Podman Compose. It keeps the
 same boundaries as `docs/v1.md`: the Pilot Client is static web content, the Ito
 Server owns catalog/session/reconstruction authority, and robot drivers connect
 outward over the Ito Protocol WebSocket control plane.
@@ -22,7 +22,15 @@ Build and run the local server, Pilot Client, and Mock Robot:
 
 ```sh
 docker compose up --build
+# or, with Podman Compose:
+podman compose up --build
 ```
+
+The Compose file uses Podman's pre-existing external `podman` network instead of
+a project-created bridge network. This keeps local Podman operation independent
+of `aardvark-dns`/user-bus startup. The Mock Robot reaches the Ito Server through
+`host.containers.internal:8765`; Docker users can still use the same Compose file
+because the server port is published to the host.
 
 Open `http://localhost:8080/`. The client defaults to the Ito Server control
 WebSocket at `ws://<page-host>:8765`, which is `ws://localhost:8765` for this
@@ -32,6 +40,8 @@ Stop and remove local containers:
 
 ```sh
 docker compose down
+# or:
+podman compose down
 ```
 
 ## Mock Robot Video
@@ -42,12 +52,17 @@ different local video file, override `ITO_MOCK_ROBOT_CAMERA_VIDEO_HOST`:
 ```sh
 ITO_MOCK_ROBOT_CAMERA_VIDEO_HOST=/absolute/path/to/mock-camera.mp4 \
   docker compose up --build
+# or:
+ITO_MOCK_ROBOT_CAMERA_VIDEO_HOST=/absolute/path/to/mock-camera.mp4 \
+  podman compose up --build
 ```
 
 Useful log streams while testing acquisition and pilot input:
 
 ```sh
 docker compose logs -f ito-server mock-robot
+# or:
+podman compose logs -f ito-server mock-robot
 ```
 
 The Mock Robot exercises the v1 WebSocket control plane, acquisition/session
