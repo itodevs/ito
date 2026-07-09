@@ -1,0 +1,24 @@
+{
+  "name": "Ito development",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "workspaceFolder": "/workspaces/ito",
+  "remoteUser": "root",
+  "runArgs": [
+    "--add-host=host.docker.internal:host-gateway"
+  ],
+  "mounts": [
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+  ],
+  "forwardPorts": [8080, 8765],
+  "portsAttributes": {
+    "8080": {
+      "label": "Pilot client"
+    },
+    "8765": {
+      "label": "Ito server"
+    }
+  }
+}

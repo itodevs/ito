@@ -51,7 +51,7 @@ export class ItoPilotApp {
   }
 
   async enterVr() {
-    if (!this.scene.is("loaded")) {
+    if (!this.scene.hasLoaded) {
       await new Promise((resolve) => this.scene.addEventListener("loaded", resolve, { once: true }));
     }
     this.scene.enterVR();
