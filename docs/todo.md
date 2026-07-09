@@ -14,8 +14,9 @@ When checking off a TODO whose task description does not fully describe the impl
    - [x] Added `server.ito.app` entry point, package scaffolding, requirements, and `server/Dockerfile`.
 5. [x] Implement server configuration from environment variables.
    - [x] Added env-backed `ServerConfig` for request timeout, driver watchdog, session cleanup timeout, and data channel profiles.
-6. [ ] Implement server WebSocket accept, hello, routing, and request timeouts.
-   - [x] Added MessagePack WebSocket accept, mandatory hello handling, basic role-based routing, and error results; outbound request timeout tracking is still deferred until acquisition/session-start requests are implemented.
+6. [x] Implement server WebSocket accept, hello, routing, and request timeouts.
+   - [x] Added MessagePack WebSocket accept, mandatory hello handling, basic role-based routing, and error results.
+   - [x] Added outbound `driver.session.start` request tracking with configured timeout handling; server-sent `session.end` does not wait for acknowledgement per protocol.
 7. [x] Implement robot-driver connection tracking and status watchdogs.
    - [x] Added driver connection records, disconnect handling, status freshness evaluation, and proactive watchdog marking for stale drivers.
 8. [x] Implement the in-memory Robot Catalog.
@@ -24,13 +25,20 @@ When checking off a TODO whose task description does not fully describe the impl
    - [x] Duplicate driver hellos mark the affected robot unavailable and log an operational error instead of choosing one connection.
 10. [x] Implement pilot-client catalog requests.
    - [x] Pilot clients can request `catalog.get` after hello and receive MessagePack `catalog.get.result` responses, with optional unavailable filtering.
-11. [ ] Implement server-side acquisition reservation.
-12. [ ] Implement driver session-start request/result handling.
-13. [ ] Implement server-owned session allocation.
-14. [ ] Implement session end and `session.ended` fan-out.
-15. [ ] Implement session cleanup for disappeared endpoints.
-16. [ ] Implement reconnect hello handling for resumable sessions.
-17. [ ] Add server tests for catalog, acquisition, lifecycle, and reconnect behavior.
+11. [x] Implement server-side acquisition reservation.
+    - [x] Acquisition now serializes through a server lock, marks the robot Occupied before driver start, and rejects competing pilots while the reservation or session exists.
+12. [x] Implement driver session-start request/result handling.
+    - [x] The server sends `driver.session.start`, correlates `driver.session.start.result` by `replyToMessageId`, releases reservations on failure or timeout, and validates the returned `sessionId`.
+13. [x] Implement server-owned session allocation.
+    - [x] The server generates `session-*` identities, stores in-memory session records, and returns Session Configuration in successful acquire and resume results.
+14. [x] Implement session end and `session.ended` fan-out.
+    - [x] Pilot/driver `session.end` requests mark the session ended, free the robot, send a driver end request when needed, and fan out `session.ended` to connected endpoints.
+15. [x] Implement session cleanup for disappeared endpoints.
+    - [x] Disconnect bookkeeping keeps sessions resumable until `ITO_SESSION_CLEANUP_TIMEOUT_MS`, then ends stale sessions with `session.ended.endpoint_disappeared`.
+16. [x] Implement reconnect hello handling for resumable sessions.
+    - [x] Pilot `connection.hello` with an active `sessionId` resumes the session and returns Session Configuration; unavailable sessions fail hello with `session.resume_unavailable`. Reconnected drivers are reattached to active sessions for their robot.
+17. [x] Add server tests for catalog, acquisition, lifecycle, and reconnect behavior.
+    - [x] Added unit tests for successful acquisition, competing acquisition, start failure, start timeout, session end fan-out, disappeared-endpoint cleanup, and reconnect resume/rejection.
 18. [ ] Scaffold the Mock Robot driver and container.
 19. [ ] Implement Mock Robot status reporting.
 20. [ ] Implement Mock Robot acquisition and session lifecycle handling.
