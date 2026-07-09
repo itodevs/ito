@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ito Pilot</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script type="module" src="./src/main.js"></script>
+  </head>
+  <body>
+    <main id="launch">
+      <h1>Ito Pilot</h1>
+      <button id="enter-vr" type="button">Enter VR</button>
+      <p id="launch-status" role="status"></p>
+    </main>
+
+    <a-scene
+      embedded
+      renderer="antialias: true; colorManagement: true"
+      vr-mode-ui="enabled: false"
+      ito-xr-frame-events>
+      <a-assets></a-assets>
+      <a-entity id="rig" position="0 0 0">
+        <a-camera id="camera" position="0 1.6 0" look-controls="enabled: true"></a-camera>
+        <a-entity
+          id="left-controller"
+          laser-controls="hand: left"
+          raycaster="objects: .ito-clickable; far: 6"
+          line="color: #7ee2d3; opacity: 0.78"></a-entity>
+        <a-entity
+          id="right-controller"
+          laser-controls="hand: right"
+          raycaster="objects: .ito-clickable; far: 6"
+          line="color: #7ee2d3; opacity: 0.78"></a-entity>
+      </a-entity>
+      <a-entity id="ito-splat-root" ito-spark-scene></a-entity>
+      <a-entity id="ito-ui-root"></a-entity>
+      <a-sky color="#071017"></a-sky>
+      <a-light type="ambient" color="#ffffff" intensity="0.65"></a-light>
+    </a-scene>
+  </body>
+</html>

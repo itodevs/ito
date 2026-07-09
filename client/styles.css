@@ -1,0 +1,53 @@
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: #071017;
+  color: #f7fbff;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#launch {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-content: center;
+  gap: 16px;
+  text-align: center;
+  background: #071017;
+}
+
+#launch h1 {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+#enter-vr {
+  min-width: 160px;
+  min-height: 48px;
+  border: 0;
+  border-radius: 8px;
+  background: #2f8f83;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 650;
+}
+
+#enter-vr:disabled {
+  background: #3a4652;
+  color: #aeb8c3;
+}
+
+#launch-status {
+  min-height: 24px;
+  margin: 0;
+  color: #b8c7d9;
+}
+
+.a-enter-vr {
+  display: none;
+}

@@ -1,35 +1,90 @@
-# Ito Droid One
+# Ito Droid ROS Driver
 
-Ito Droid One is a physical robot concept for Ito, immersive teleoperation
-software built entirely for human pilots. This document is hardware reference
-material, not the current Ito driver contract or an implementation guide for
-the first software version.
+This is the v1 Robot Driver for the physical Ito Droid target. It adapts
+between Ito Protocol control-plane messages, direct pilot input snapshots, and
+robot-local ROS camera and servo topics.
 
-The current v1 target is described in `../../docs/v1.md`.
+The driver is intentionally robot-side only: ROS topics and servo commands do
+not leak into the Pilot Client, Ito Server, or Ito Protocol.
 
-It is a simple, low-cost demo robot using hobby servos. It is intended as a
-lightweight upper-body or non-walking humanoid. SG90 torque is not sufficient to
-carry the Pi and battery through a walking gait, but works well for joints that
-only move light 3D-printed parts.
+## Container
 
-## Hardware
+Build from the repository root:
 
-| Qty | Part |
-|---|---|
-| 1 | Raspberry Pi 5 (4GB) |
-| 2 | Raspberry Pi Global Shutter Camera (IMX296) |
-| 2 | Wide FOV C/CS-mount lens |
-| 1 | PCA9685 16-channel PWM Servo HAT (I2C) |
-| n | SG90 hobby servo |
-| 1 | 3S LiPo battery (11.1V nominal) |
-| 2 | 5V buck converter (BEC) |
+```bash
+docker build -f drivers/ito-droid/Dockerfile -t ito-droid-driver .
+```
 
-The 3S LiPo feeds two buck converters: one for the Pi (via USB-C or GPIO 5V pin), one for the PCA9685 HAT's V+ servo rail. SG90s are rated 4.8–6V so the servo rail must be regulated down — the PCA9685 HAT passes V+ straight through to the servos with no onboard regulation. Two separate converters keeps servo current spikes off the Pi's supply.
+Run it on the robot or in a ROS network where the configured camera and servo
+topics are available:
 
-## Cameras
+```bash
+docker run --rm --network host \
+  -e ITO_SERVER_URL=ws://ito-server.local:8765 \
+  -e ITO_DROID_ROS_CAMERA_TOPIC=/image_raw \
+  -e ITO_DROID_ROS_SERVO_COMMAND_TOPIC=/ito_droid/camera_pan/command \
+  ito-droid-driver
+```
 
-Stereo pair using two Pi Global Shutter cameras (IMX296, 1.6MP, 1456x1088) with wide FOV C/CS-mount lenses. Global shutter is important for SLAM accuracy during fast head motion.
+## Environment
 
-The Pi 5 has two CSI connectors and supports hardware sync between cameras via the shutter sync line. See the [Pi camera sync docs](https://www.raspberrypi.com/documentation/accessories/camera.html#synchronous-captures).
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ITO_SERVER_URL` | `ws://localhost:8765` | Ito Server WebSocket control URL. |
+| `ITO_DROID_ROBOT_ID` | `ito-droid-1` | Stable robot identity reported to the server. |
+| `ITO_DROID_NAME` | `Ito Droid` | Pilot-facing robot name. |
+| `ITO_DROID_STATUS_INTERVAL_MS` | `1000` | Driver status/heartbeat interval. |
+| `ITO_DROID_RECONNECT_INITIAL_DELAY_MS` | `250` | Initial reconnect backoff. |
+| `ITO_DROID_RECONNECT_MAX_DELAY_MS` | `5000` | Maximum reconnect backoff. |
+| `ITO_DROID_ROS_CAMERA_TOPIC` | `/image_raw` | ROS `sensor_msgs/Image` camera feed to consume. |
+| `ITO_DROID_ROS_SERVO_COMMAND_TOPIC` | `/ito_droid/camera_pan/command` | ROS `std_msgs/Float64` camera-pan command topic, in degrees. |
+| `ITO_DROID_ROS_NODE_NAME` | `ito_droid_driver` | ROS node name. |
+| `ITO_DROID_PILOT_INPUT_TIMEOUT_MS` | `2000` | Missing pilot-input timeout before control loss. |
+| `ITO_DROID_CONTROL_TICK_HZ` | `60` | Driver-owned control loop tick rate. |
+| `ITO_DROID_SERVO_NEUTRAL_DEGREES` | `90` | Camera-pan neutral angle. |
+| `ITO_DROID_SERVO_MIN_DEGREES` | `15` | Camera-pan lower limit. |
+| `ITO_DROID_SERVO_MAX_DEGREES` | `165` | Camera-pan upper limit. |
+| `ITO_DROID_YAW_TO_SERVO_DEGREES_PER_RADIAN` | `57.29577951308232` | Relative headset-yaw to servo-angle scale. |
+| `ITO_DROID_SERVO_SMOOTHING` | `0.35` | Per-tick smoothing factor from current command toward target. |
+| `ITO_DROID_SERVO_MAX_VELOCITY_DEGREES_PER_SECOND` | `180` | Normal correction velocity limit. |
+| `ITO_DROID_RESUMPTION_INITIAL_VELOCITY_DEGREES_PER_SECOND` | `20` | Correction velocity immediately after recoverable control loss. |
+| `ITO_DROID_RESUMPTION_RAMP_DURATION_MS` | `1500` | Duration for ramping correction velocity back to normal. |
 
-Stereo calibration is done once per rig using OpenCV's stereo calibration routine with a checkerboard pattern.
+## Current WebRTC State
+
+The driver has explicit seams for:
+
+- consuming ROS camera frames;
+- handing frames to the driver-to-server camera media publisher;
+- receiving Pilot Input Snapshots from the client-to-driver path.
+
+Concrete H.264 camera media transport to the server remains covered by TODO 23
+in `../../docs/todo.md`.
+
+## Physical Smoke Test Expectations
+
+Run this smoke pass only with the Ito Droid on a trusted private network, the
+Ito Server reachable from the robot host, the configured ROS camera topic
+publishing, and the configured servo command topic connected to the camera-pan
+servo path.
+
+Expected checks:
+
+- The driver connects to the Ito Server and the Droid appears in the Robot
+  Catalog as Available only after the ROS camera feed and servo path are ready.
+- Acquiring the Droid starts a server-owned piloting session and the driver
+  neutralizes the camera-pan servo before accepting pilot input.
+- Pilot headset yaw maps to camera-pan servo motion within the configured
+  servo limits, smoothing, and velocity limits.
+- Opening the in-VR menu or otherwise withholding pilot input for longer than
+  `ITO_DROID_PILOT_INPUT_TIMEOUT_MS` holds the last commanded servo position.
+- Resuming pilot input after control loss ramps correction velocity according
+  to `ITO_DROID_RESUMPTION_INITIAL_VELOCITY_DEGREES_PER_SECOND` and
+  `ITO_DROID_RESUMPTION_RAMP_DURATION_MS` instead of snapping immediately.
+- A clean session end attempts to return the camera-pan servo to neutral and
+  returns the robot to catalog availability when the driver is otherwise ready.
+- Driver- or hardware-failure conditions end the affected session with a
+  displayable Session Termination Reason rather than crashing the Ito Server.
+
+Record physical results in `../../docs/acceptance-v1.md`. Keep hardware-only
+acceptance unchecked until this pass is actually run.

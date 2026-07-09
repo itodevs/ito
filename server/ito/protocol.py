@@ -25,6 +25,13 @@ TYPE_SESSION_ENDED = "session.ended"
 TYPE_WEBRTC_OFFER = "webrtc.offer"
 TYPE_WEBRTC_ANSWER = "webrtc.answer"
 
+WEBRTC_PATH_PILOT_INPUT = "pilotInput"
+WEBRTC_PATH_CAMERA_MEDIA = "cameraMedia"
+WEBRTC_PATH_SPLAT_BATCHES = "splatBatches"
+WEBRTC_PATHS = frozenset(
+    {WEBRTC_PATH_PILOT_INPUT, WEBRTC_PATH_CAMERA_MEDIA, WEBRTC_PATH_SPLAT_BATCHES}
+)
+
 MESSAGE_TYPES = frozenset(
     {
         TYPE_CATALOG_GET,
@@ -187,6 +194,15 @@ def validate_envelope(envelope: Mapping[str, Any]) -> None:
     for field in ("robotId", "sessionId"):
         if envelope.get(field) is not None and not isinstance(envelope.get(field), str):
             raise ProtocolError(f"{field} must be a string when present")
+    if envelope.get("type") in {TYPE_WEBRTC_OFFER, TYPE_WEBRTC_ANSWER}:
+        validate_webrtc_signal_payload(envelope["payload"])
+
+
+def validate_webrtc_signal_payload(payload: Mapping[str, Any]) -> None:
+    if payload.get("path") not in WEBRTC_PATHS:
+        raise ProtocolError(f"unknown WebRTC live path: {payload.get('path')!r}")
+    if not isinstance(payload.get("sdp"), str) or not payload["sdp"]:
+        raise ProtocolError("WebRTC signaling payload requires non-empty SDP")
 
 
 def pack_envelope(envelope: Mapping[str, Any]) -> bytes:

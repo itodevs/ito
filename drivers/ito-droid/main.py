@@ -1,17 +1,7 @@
-import cv2
-from dotenv import load_dotenv
-import os
+"""Ito Droid driver entry point."""
 
-load_dotenv()
+from ito_droid.driver import main
 
-pi_ip = os.getenv('ROBOT_IP')
-cap = cv2.VideoCapture(f'http://{pi_ip}:8080/stream?topic=/image_raw')
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        continue
-    # feed to MAST3R-SLAM here
-    cv2.imshow('frame', frame)
-    if cv2.waitKey(1) == ord('q'):
-        break
+if __name__ == "__main__":
+    main()
