@@ -18,3 +18,6 @@ Run tests from the repository root:
 ```sh
 pytest -q
 ```
+
+Docker Compose commands for running the Ito Server with the static Pilot Client
+and optional Mock Robot are documented in `../docs/local-v1.md`.

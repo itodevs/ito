@@ -132,7 +132,15 @@ When checking off a TODO whose task description does not fully describe the impl
     - [x] Clean server `session.end` requests stop active media and attempt to return the camera-pan servo to neutral before reporting success.
 64. [x] Add driver tests around mapping, timeout, and lifecycle behavior.
     - [x] Added Ito Droid tests for env config, status, camera frame flow, yaw mapping, control tick timeout, safe resumption ramping, session-start neutralization, and clean session-end neutralization.
-65. [ ] Add end-to-end Mock Robot tests over WebSocket and WebRTC.
+65. [x] Add end-to-end Mock Robot tests over WebSocket and WebRTC.
+    - [x] Added `tests/test_mock_robot_e2e.py`, which starts a real local Ito Server WebSocket endpoint, runs the actual Mock Robot driver against it, acquires the robot as a pilot, negotiates relayed `pilotInput` WebRTC with `aiortc`, and sends a Pilot Input Snapshot over the data channel into the mock driver's logging sink. The test is skipped when the local Python environment has not installed the documented `aiortc` dependency.
+    - [x] Added Mock Robot `pilotInput` WebRTC offer handling in `drivers/mock-robot/mock_robot/webrtc.py` and `drivers/mock-robot/mock_robot/driver.py`; driver-to-server H.264 camera media remains TODO 23.
 66. [ ] Add end-to-end Ito Droid smoke testing on physical hardware.
-67. [ ] Document Docker Compose commands for local v1 operation.
+    - [x] Documented physical smoke-test expectations in `drivers/ito-droid/README.md` and the hardware-only acceptance checklist in `docs/acceptance-v1.md`.
+    - [ ] Not run locally: requires physical Ito Droid hardware, reachable Ito Server, robot-local ROS camera feed, servo command path, and Pico 4 browser.
+67. [x] Document Docker Compose commands for local v1 operation.
+    - [x] Added `compose.yaml` with `ito-server`, `pilot-client`, optional `mock` profile, and optional `droid` profile services.
+    - [x] Added `docs/local-v1.md` with build/run/log/down commands, Mock Robot H.264 sample-file mounting, Ito Droid robot-side profile usage, and local test commands.
 68. [ ] Run a full v1 acceptance pass against the core outcome.
+    - [x] Recorded the current local acceptance pass in `docs/acceptance-v1.md`, including server/protocol/client/driver unit coverage and the new Mock Robot WebSocket/WebRTC e2e path.
+    - [ ] Full core-outcome acceptance remains blocked by TODO 23 driver-to-server H.264 WebRTC media transport, TODO 27-30/32 reconstruction selection and integration, TODO 35/51 Pico 4 Spark/browser validation, and TODO 66 physical Ito Droid smoke testing.

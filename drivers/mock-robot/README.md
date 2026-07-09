@@ -5,8 +5,9 @@ The Mock Robot is Ito's robot-driver test double.
 It speaks the Ito v1 WebSocket control plane as a Robot Driver, reports itself
 to the Robot Catalog, accepts server-owned session lifecycle requests, logs
 Pilot Input Snapshots to stdout, and opens a configured video file as mock
-camera input. H.264 WebRTC publishing still requires the shared driver-side
-`aiortc` transport integration and is not exercised by the local unit tests.
+camera input. The local end-to-end tests exercise client-to-driver pilot input
+over an `aiortc` WebRTC data channel. H.264 WebRTC publishing from the mock
+camera file to the server remains covered by TODO 23.
 
 ## Configuration
 
@@ -34,4 +35,11 @@ Build the container from the repository root:
 
 ```sh
 docker build -f drivers/mock-robot/Dockerfile -t ito-mock-robot .
+```
+
+Run through Docker Compose with the local Ito Server and Pilot Client:
+
+```sh
+ITO_MOCK_ROBOT_CAMERA_VIDEO_HOST=/absolute/path/to/mock-camera.h264 \
+  docker compose --profile mock up --build ito-server pilot-client mock-robot
 ```

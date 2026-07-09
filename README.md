@@ -22,7 +22,9 @@ comfortable immersive 3D reconstruction of its surroundings.
 
 Ito is being reset around the v1 design in `docs/v1.md`. Protocol seams are
 documented in `docs/protocol.md`, and architectural decisions are recorded in
-`docs/adr/`.
+`docs/adr/`. Local Docker Compose operation is documented in
+`docs/local-v1.md`, and the current v1 acceptance record is in
+`docs/acceptance-v1.md`.
 
 The main source directories are:
 

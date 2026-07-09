@@ -58,5 +58,33 @@ The driver has explicit seams for:
 - handing frames to the driver-to-server camera media publisher;
 - receiving Pilot Input Snapshots from the client-to-driver path.
 
-The shared non-trickle WebRTC signaling and concrete H.264 media transport are
-still covered by TODO 23, TODO 24, and TODO 26 in `../../docs/todo.md`.
+Concrete H.264 camera media transport to the server remains covered by TODO 23
+in `../../docs/todo.md`.
+
+## Physical Smoke Test Expectations
+
+Run this smoke pass only with the Ito Droid on a trusted private network, the
+Ito Server reachable from the robot host, the configured ROS camera topic
+publishing, and the configured servo command topic connected to the camera-pan
+servo path.
+
+Expected checks:
+
+- The driver connects to the Ito Server and the Droid appears in the Robot
+  Catalog as Available only after the ROS camera feed and servo path are ready.
+- Acquiring the Droid starts a server-owned piloting session and the driver
+  neutralizes the camera-pan servo before accepting pilot input.
+- Pilot headset yaw maps to camera-pan servo motion within the configured
+  servo limits, smoothing, and velocity limits.
+- Opening the in-VR menu or otherwise withholding pilot input for longer than
+  `ITO_DROID_PILOT_INPUT_TIMEOUT_MS` holds the last commanded servo position.
+- Resuming pilot input after control loss ramps correction velocity according
+  to `ITO_DROID_RESUMPTION_INITIAL_VELOCITY_DEGREES_PER_SECOND` and
+  `ITO_DROID_RESUMPTION_RAMP_DURATION_MS` instead of snapping immediately.
+- A clean session end attempts to return the camera-pan servo to neutral and
+  returns the robot to catalog availability when the driver is otherwise ready.
+- Driver- or hardware-failure conditions end the affected session with a
+  displayable Session Termination Reason rather than crashing the Ito Server.
+
+Record physical results in `../../docs/acceptance-v1.md`. Keep hardware-only
+acceptance unchecked until this pass is actually run.
