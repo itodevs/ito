@@ -10,18 +10,18 @@ outward over the Ito Protocol WebSocket control plane.
 - `ito-server`: Python Ito Server on `ws://localhost:8765`.
 - `pilot-client`: nginx static hosting for `client/` on
   `http://localhost:8080`.
-- `mock-robot`: optional profile-backed Mock Robot driver. It requires a local
-  H.264 file and reports Available only when that file is mounted.
+- `mock-robot`: Mock Robot driver. It starts by default and uses
+  `fixtures/mock-camera.mp4` when present.
 - `ito-droid`: optional profile-backed physical Ito Droid ROS driver. It is
   intended for robot-side use with host networking and an existing ROS camera
   feed/servo command path.
 
-## Server and Pilot Client
+## Local Stack
 
-Build and run the local server plus static Pilot Client:
+Build and run the local server, Pilot Client, and Mock Robot:
 
 ```sh
-docker compose up --build ito-server pilot-client
+docker compose up --build
 ```
 
 Open `http://localhost:8080/`. The client defaults to the Ito Server control
@@ -34,15 +34,14 @@ Stop and remove local containers:
 docker compose down
 ```
 
-## Mock Robot
+## Mock Robot Video
 
-The Mock Robot needs an H.264 sample file. Point
-`ITO_MOCK_ROBOT_CAMERA_VIDEO_HOST` at a local file before enabling the `mock`
-profile:
+By default, the Mock Robot mounts `fixtures/mock-camera.mp4`. To use a
+different local video file, override `ITO_MOCK_ROBOT_CAMERA_VIDEO_HOST`:
 
 ```sh
-ITO_MOCK_ROBOT_CAMERA_VIDEO_HOST=/absolute/path/to/mock-camera.h264 \
-  docker compose --profile mock up --build ito-server pilot-client mock-robot
+ITO_MOCK_ROBOT_CAMERA_VIDEO_HOST=/absolute/path/to/mock-camera.mp4 \
+  docker compose up --build
 ```
 
 Useful log streams while testing acquisition and pilot input:

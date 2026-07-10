@@ -3,3 +3,4 @@
 **/.pytest_cache/
 **/node_modules/
 **/dist/
+fixtures/mock-camera.mp4

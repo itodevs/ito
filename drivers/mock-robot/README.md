@@ -40,6 +40,8 @@ docker build -f drivers/mock-robot/Dockerfile -t ito-mock-robot .
 Run through Docker Compose with the local Ito Server and Pilot Client:
 
 ```sh
-ITO_MOCK_ROBOT_CAMERA_VIDEO_HOST=/absolute/path/to/mock-camera.h264 \
-  docker compose --profile mock up --build ito-server pilot-client mock-robot
+docker compose up --build
 ```
+
+This uses `fixtures/mock-camera.mp4` by default. Override it with
+`ITO_MOCK_ROBOT_CAMERA_VIDEO_HOST=/absolute/path/to/video.mp4` when needed.

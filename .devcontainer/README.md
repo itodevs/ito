@@ -3,7 +3,7 @@
 Open this repository in a Dev Container, then start the local stack with:
 
 ```sh
-docker compose --profile mock up --build
+docker compose up --build
 ```
 
 The container includes Python, Docker Compose, and `playwright-cli` with its

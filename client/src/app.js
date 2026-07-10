@@ -31,6 +31,7 @@ export class ItoPilotApp {
       rateHz: this.settings.pilotInputRateHz,
     });
     this.xrReferenceSpace = null;
+    this.controllerMenuHandlersInstalled = false;
   }
 
   async init() {
@@ -41,7 +42,8 @@ export class ItoPilotApp {
     this.launchButton.addEventListener("click", () => this.enterVr());
     this.scene.addEventListener("click", (event) => this.handleClick(event));
     this.scene.addEventListener("enter-vr", () => this.connectAndShowCatalog());
-    this.scene.addEventListener("loaded", () => this.installControllerMenuHandlers());
+    if (this.scene.hasLoaded) this.installControllerMenuHandlers();
+    else this.scene.addEventListener("loaded", () => this.installControllerMenuHandlers(), { once: true });
     this.scene.addEventListener("xrframe", (event) => this.onXrFrame(event.detail));
 
     if (!(await navigator.xr?.isSessionSupported?.("immersive-vr"))) {
@@ -332,12 +334,26 @@ export class ItoPilotApp {
   }
 
   installControllerMenuHandlers() {
+    if (this.controllerMenuHandlersInstalled) return;
+    this.controllerMenuHandlersInstalled = true;
     for (const id of ["left-controller", "right-controller"]) {
       const controller = document.getElementById(id);
-      controller?.addEventListener("abuttondown", () => this.toggleMenu());
-      controller?.addEventListener("xbuttondown", () => this.toggleMenu());
+      const activateTargetOrToggleMenu = () => {
+        if (!this.activateControllerTarget(controller)) this.toggleMenu();
+      };
+      controller?.addEventListener("abuttondown", activateTargetOrToggleMenu);
+      controller?.addEventListener("xbuttondown", activateTargetOrToggleMenu);
       controller?.addEventListener("menudown", () => this.toggleMenu());
     }
+  }
+
+  activateControllerTarget(controller) {
+    const target = controller?.components?.raycaster?.intersectedEls
+      ?.map((entity) => entity.closest?.("[data-action]") || (entity.hasAttribute("data-action") ? entity : null))
+      .find(Boolean);
+    if (!target) return false;
+    target.emit("click", { cursorEl: controller }, true);
+    return true;
   }
 
   renderStatus(message) {

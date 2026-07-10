@@ -5,7 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Ito Pilot</title>
     <link rel="stylesheet" href="./styles.css" />
-    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "aframe": "https://aframe.io/releases/1.8.0/aframe.module.min.js",
+          "three": "https://cdn.jsdelivr.net/npm/super-three@0.184.0/build/three.module.min.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/super-three@0.184.0/examples/jsm/"
+        }
+      }
+    </script>
     <script type="module" src="./src/main.js"></script>
   </head>
   <body>

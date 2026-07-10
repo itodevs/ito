@@ -25,8 +25,6 @@ services:
       - "8080:80"
 
   mock-robot:
-    profiles:
-      - mock
     build:
       context: .
       dockerfile: drivers/mock-robot/Dockerfile
@@ -37,10 +35,10 @@ services:
       ITO_MOCK_ROBOT_ID: mock-robot-1
       ITO_MOCK_ROBOT_NAME: Mock Robot
       ITO_MOCK_ROBOT_STATUS_INTERVAL_MS: "1000"
-      ITO_MOCK_ROBOT_CAMERA_VIDEO: /data/mock-camera.h264
+      ITO_MOCK_ROBOT_CAMERA_VIDEO: /data/mock-camera.mp4
       ITO_MOCK_ROBOT_CAMERA_LOOP: "true"
     volumes:
-      - ${ITO_MOCK_ROBOT_CAMERA_VIDEO_HOST:-./fixtures/mock-camera.h264}:/data/mock-camera.h264:ro
+      - ${ITO_MOCK_ROBOT_CAMERA_VIDEO_HOST:-./fixtures/mock-camera.mp4}:/data/mock-camera.mp4:ro
 
   ito-droid:
     profiles:

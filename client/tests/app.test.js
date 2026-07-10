@@ -44,3 +44,83 @@ test("enterVr waits for A-Frame's loaded event before entering", async () => {
 
   assert.equal(entered, 1);
 });
+
+test("controller A/X activation clicks the aimed-at UI action", () => {
+  const emitted = [];
+  const target = {
+    hasAttribute(name) {
+      return name === "data-action";
+    },
+    emit(...args) {
+      emitted.push(args);
+    },
+  };
+  const controller = { components: { raycaster: { intersectedEls: [target] } } };
+
+  const activated = ItoPilotApp.prototype.activateControllerTarget.call({}, controller);
+
+  assert.equal(activated, true);
+  assert.deepEqual(emitted, [["click", { cursorEl: controller }, true]]);
+});
+
+test("controller A/X activation resolves an action from a raycast child mesh", () => {
+  const emitted = [];
+  const target = {
+    emit(...args) {
+      emitted.push(args);
+    },
+  };
+  const mesh = {
+    closest(selector) {
+      assert.equal(selector, "[data-action]");
+      return target;
+    },
+    hasAttribute() {
+      return false;
+    },
+  };
+  const controller = { components: { raycaster: { intersectedEls: [mesh] } } };
+
+  const activated = ItoPilotApp.prototype.activateControllerTarget.call({}, controller);
+
+  assert.equal(activated, true);
+  assert.deepEqual(emitted, [["click", { cursorEl: controller }, true]]);
+});
+
+test("controller A/X activation falls back when no UI action is aimed at", () => {
+  const controller = { components: { raycaster: { intersectedEls: [] } } };
+
+  const activated = ItoPilotApp.prototype.activateControllerTarget.call({}, controller);
+
+  assert.equal(activated, false);
+});
+
+test("controller handlers are only installed once", () => {
+  const originalDocument = globalThis.document;
+  const handlers = [];
+  globalThis.document = {
+    getElementById() {
+      return {
+        addEventListener(name, callback) {
+          handlers.push({ name, callback });
+        },
+      };
+    },
+  };
+  const app = {
+    controllerMenuHandlersInstalled: false,
+    activateControllerTarget() {
+      return false;
+    },
+    toggleMenu() {},
+  };
+
+  try {
+    ItoPilotApp.prototype.installControllerMenuHandlers.call(app);
+    ItoPilotApp.prototype.installControllerMenuHandlers.call(app);
+  } finally {
+    globalThis.document = originalDocument;
+  }
+
+  assert.equal(handlers.length, 6);
+});

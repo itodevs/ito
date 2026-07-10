@@ -1,3 +1,5 @@
+import AFRAME from "aframe";
+
 import { ItoPilotApp } from "./app.js";
 
 AFRAME.registerComponent("ito-xr-frame-events", {

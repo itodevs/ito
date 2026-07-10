@@ -39,6 +39,7 @@ export class VrUi {
       color: enabled ? "#2f8f83" : "#3a4652",
       opacity: 0.96,
     });
+    background.classList.toggle("ito-clickable", enabled);
     button.appendChild(background);
     button.appendChild(textEntity(label, { x: 0, y: -0.032, z: 0.015 }, 0.075, "#ffffff", "center", width - 0.08));
     parent.appendChild(button);
