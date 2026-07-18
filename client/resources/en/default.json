@@ -9,9 +9,7 @@
     "connecting": "Connecting...",
     "connected": "Connected",
     "failed": "Connection failed",
-    "retry": "Retry",
-    "localBackend": "Robot integration and reconstruction are running onboard.",
-    "remoteBackend": "Ito is connected to the robot's lightweight remote driver."
+    "retry": "Retry"
   },
   "control": {
     "ready": "Ready",

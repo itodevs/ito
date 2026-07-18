@@ -62,6 +62,7 @@ class CameraPanController:
         if age_ms > self.config.pilot_input_timeout_ms:
             self._control_lost = True
             self._resumed_at_seconds = None
+            self.command_degrees = self.config.servo_neutral_degrees
             return self.command_degrees
 
         target = self.target_for_yaw(snapshot.headset_yaw_radians)

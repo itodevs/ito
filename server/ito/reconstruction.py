@@ -17,20 +17,18 @@ class ReconstructionRuntime:
 
     def __init__(
         self,
-        control_key: str,
         processor: ReconstructionProcessor,
         *,
         send_splat_batch: Callable[[bytes], None],
         fail_control: Callable[[dict[str, str]], None],
     ) -> None:
-        self.control_key = control_key
         self.processor = processor
         self.send_splat_batch = send_splat_batch
         self.fail_control = fail_control
         self.failed = False
 
     def start(self) -> None:
-        self.processor.start(self.control_key)
+        self.processor.start()
 
     def process_frame(self, frame: ReconstructionFrame) -> None:
         if self.failed:

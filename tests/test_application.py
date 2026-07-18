@@ -62,7 +62,6 @@ def test_pilot_connects_directly_to_the_one_configured_robot():
             "ok": True,
             "value": {
                 "protocolVersion": "ito.v1",
-                "backend": "local",
                 "robotReady": True,
                 "controlActive": False,
                 "controlConfig": application.config.control_config_payload(),
@@ -70,6 +69,51 @@ def test_pilot_connects_directly_to_the_one_configured_robot():
         }
         assert "robotId" not in response
         assert "sessionId" not in response
+
+    asyncio.run(scenario())
+
+
+def test_unwired_default_local_backend_does_not_claim_robot_readiness():
+    async def scenario():
+        application = ItoApplication()
+        pilot = state()
+
+        response = await hello(application, pilot)
+
+        assert response["payload"]["value"]["robotReady"] is False
+
+    asyncio.run(scenario())
+
+
+def test_application_runs_the_configured_reconstruction_processor():
+    class Processor:
+        capture_modality = "monocularRgb"
+
+        def start(self):
+            self.started = True
+
+        def process_frame(self, frame):
+            return []
+
+        def reset(self):
+            pass
+
+        def close(self):
+            pass
+
+    async def scenario():
+        processor = Processor()
+        application = ItoApplication(
+            adapter=LocalRobotAdapter(),
+            processor_factory=lambda: processor,
+        )
+        pilot = state()
+        await hello(application, pilot)
+
+        await send(application, pilot, TYPE_CONTROL_START, {}, "start")
+
+        assert processor.started is True
+        assert application.reconstruction_runtime.processor is processor
 
     asyncio.run(scenario())
 
@@ -172,8 +216,8 @@ def test_remote_driver_is_configuration_not_a_client_visible_product_choice():
         pilot_response = await hello(application, pilot)
 
         assert driver_response["payload"]["ok"] is True
-        assert pilot_response["payload"]["value"]["backend"] == "remote"
         assert pilot_response["payload"]["value"]["robotReady"] is True
+        assert "backend" not in pilot_response["payload"]["value"]
         assert "robotId" not in pilot_response
 
     asyncio.run(scenario())

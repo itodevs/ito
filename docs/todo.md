@@ -12,6 +12,10 @@
 - [x] Pilot input and Splat Batch WebRTC paths terminate at the Ito endpoint in
   onboard mode.
 - [x] Robot-local timeout and neutralization behavior remains in Ito Droid.
+- [x] Local adapter owns input timeout, newest-input rate limiting, neutral stop,
+  emergency stop, and explicit restart after an emergency stop.
+- [x] Ito Droid remote fallback carries pilot input and ROS camera frames over
+  WebRTC while retaining control and safety on the robot.
 - [x] One-container Compose deployment serves the client.
 
 ## Next concrete work
@@ -20,8 +24,6 @@
   the existing `ReconstructionProcessor` seam.
 - [ ] Connect a production local adapter to Ito Droid ROS sensor and actuator
   APIs so the physical reference robot uses onboard mode.
-- [ ] Complete Ito Droid camera WebRTC publishing for the external fallback;
-  the mock remote driver currently exercises the complete fallback transport.
 - [ ] Run Pico 4 hardware acceptance for control, visual freshness, disconnect,
   and safe resumption.
 - [ ] Measure end-to-end latency and avoidable copies in both placement modes.

@@ -35,7 +35,6 @@ from .config import MockRobotConfig
 from .webrtc import CameraMediaWebRtcPublisher, PilotInputWebRtcReceiver
 
 LOGGER = logging.getLogger(__name__)
-CONTROL_KEY = "control"
 
 
 class MockRobotDriver:
@@ -145,7 +144,7 @@ class MockRobotDriver:
             return
         if self.pilot_input_webrtc is None:
             self.pilot_input_webrtc = PilotInputWebRtcReceiver(self.receive_pilot_input_snapshot)
-        answer = await self.pilot_input_webrtc.accept_offer(control_key=CONTROL_KEY, sdp=sdp)
+        answer = await self.pilot_input_webrtc.accept_offer(sdp=sdp)
         await websocket.send(
             pack_envelope(
                 make_envelope(
@@ -161,7 +160,7 @@ class MockRobotDriver:
         if envelope["payload"].get("path") != WEBRTC_PATH_CAMERA_MEDIA or not isinstance(sdp, str):
             return
         if self.camera_media_webrtc is not None:
-            await self.camera_media_webrtc.accept_answer(control_key=CONTROL_KEY, sdp=sdp)
+            await self.camera_media_webrtc.accept_answer(sdp=sdp)
 
     async def _start_camera_media(self, websocket: Any) -> None:
         if not self.control_active or self.camera is None:
@@ -169,7 +168,6 @@ class MockRobotDriver:
         if self.camera_media_webrtc is None:
             self.camera_media_webrtc = CameraMediaWebRtcPublisher()
         sdp = await self.camera_media_webrtc.create_offer(
-            control_key=CONTROL_KEY,
             video_path=self.camera.path,
             loop=self.camera.loop,
         )
@@ -207,9 +205,9 @@ class MockRobotDriver:
         if self.camera is not None:
             self.camera.close()
         if self.pilot_input_webrtc is not None:
-            await self.pilot_input_webrtc.close_control(CONTROL_KEY)
+            await self.pilot_input_webrtc.close()
         if self.camera_media_webrtc is not None:
-            await self.camera_media_webrtc.close_control(CONTROL_KEY)
+            await self.camera_media_webrtc.close()
 
 
 async def run(config: MockRobotConfig | None = None) -> None:

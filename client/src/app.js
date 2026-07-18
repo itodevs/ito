@@ -84,8 +84,6 @@ export class ItoPilotApp {
       title: this.text.t("control.ready"),
       subtitle: reason ? this.text.displayReason(reason) : "",
     });
-    const backendKey = this.endpoint?.backend === "remote" ? "connection.remoteBackend" : "connection.localBackend";
-    this.ui.label(panel, this.text.t(backendKey), "-1.42 0.36 0.02");
     this.ui.button(panel, {
       label: this.endpoint?.robotReady ? this.text.t("control.start") : this.text.t("control.notReady"),
       position: "-0.45 -0.22 0.02",

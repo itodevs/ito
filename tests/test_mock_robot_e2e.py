@@ -34,18 +34,17 @@ class FakeCameraPublisher:
     async def accept_answer(self, **_kwargs):
         pass
 
-    async def close_control(self, _control_key):
+    async def close(self):
         pass
 
 
 class FakeLivePaths:
-    async def accept_offer(self, *, path, control_key, sdp):
-        assert control_key == "control"
+    async def accept_offer(self, *, path, sdp):
         assert path == "cameraMedia"
         assert sdp == "camera offer"
         return "camera answer"
 
-    async def close_control(self, _control_key):
+    async def close_control(self):
         pass
 
 

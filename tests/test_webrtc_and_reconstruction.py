@@ -1,7 +1,7 @@
 from server.ito.media import AiortcCameraTrackReceiver
 from server.ito.reconstruction import ReconstructionRuntime
 from server.ito.splat import decode_splat_batch_header, encode_splat_batch
-from server.ito.webrtc import SplatBatchChannelRegistry, decode_pilot_input_snapshot
+from server.ito.webrtc import SplatBatchChannel, decode_pilot_input_snapshot
 from server.processors.base import GaussianSplat, ProcessorSplatBatch, ReconstructionFrame
 
 
@@ -39,8 +39,8 @@ def test_splat_batch_encoder_header_and_size():
 class FailingProcessor:
     capture_modality = "monocularRgb"
 
-    def start(self, control_key):
-        self.control_key = control_key
+    def start(self):
+        pass
 
     def process_frame(self, frame):
         raise RuntimeError("boom")
@@ -55,7 +55,6 @@ class FailingProcessor:
 def test_reconstruction_failure_is_reported_without_raising():
     failures = []
     runtime = ReconstructionRuntime(
-        "control",
         FailingProcessor(),
         send_splat_batch=lambda payload: None,
         fail_control=failures.append,
@@ -99,9 +98,9 @@ def test_splat_channel_sends_only_when_open():
         def send(self, payload):
             self.sent.append(payload)
 
-    registry = SplatBatchChannelRegistry()
+    registry = SplatBatchChannel()
     channel = Channel()
-    registry.attach("control", channel)
+    registry.attach(channel)
 
-    assert registry.send("control", b"batch") is True
+    assert registry.send(b"batch") is True
     assert channel.sent == [b"batch"]

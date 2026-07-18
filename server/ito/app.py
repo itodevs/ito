@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 import logging
 import mimetypes
@@ -45,11 +46,11 @@ from .protocol import (
 from .reconstruction import ReconstructionRuntime
 from .media import AiortcCameraTrackReceiver
 from .robot import LocalRobotAdapter, RemoteRobotAdapter
-from .webrtc import MissingWebRtcStack, ServerLivePathAcceptor, SplatBatchChannelRegistry
+from .webrtc import MissingWebRtcStack, ServerLivePathAcceptor, SplatBatchChannel
 from server.processors.null import NullReconstructionProcessor
+from server.processors.base import ReconstructionProcessor
 
 LOGGER = logging.getLogger(__name__)
-CONTROL_RUNTIME_KEY = "control"
 
 
 @dataclass(eq=False)
@@ -64,18 +65,20 @@ class ItoApplication:
         config: ItoConfig | None = None,
         *,
         adapter: LocalRobotAdapter | RemoteRobotAdapter | None = None,
+        processor_factory: Callable[[], ReconstructionProcessor] | None = None,
     ) -> None:
         self.config = config or ItoConfig.from_env()
         if adapter is None:
             adapter = (
                 RemoteRobotAdapter(request_timeout_ms=self.config.request_timeout_ms)
                 if self.config.robot_backend == "remote"
-                else LocalRobotAdapter()
+                else LocalRobotAdapter(ready=False)
             )
         self.adapter = adapter
+        self.processor_factory = processor_factory or NullReconstructionProcessor
         self.pilot: ConnectionState | None = None
         self.control_active = False
-        self.splat_channels = SplatBatchChannelRegistry()
+        self.splat_channels = SplatBatchChannel()
         self.live_paths: ServerLivePathAcceptor = MissingWebRtcStack()
         self.reconstruction_runtime: ReconstructionRuntime | None = None
         if isinstance(self.adapter, LocalRobotAdapter):
@@ -256,7 +259,6 @@ class ItoApplication:
             result_ok(
                 {
                     "protocolVersion": PROTOCOL_VERSION,
-                    "backend": self.config.robot_backend,
                     "robotReady": self.adapter.ready,
                     "controlActive": self.control_active,
                     "controlConfig": self.config.control_config_payload(),
@@ -378,11 +380,8 @@ class ItoApplication:
         if self.reconstruction_runtime is not None:
             return
         runtime = ReconstructionRuntime(
-            CONTROL_RUNTIME_KEY,
-            NullReconstructionProcessor(),
-            send_splat_batch=lambda payload: self.splat_channels.send(
-                CONTROL_RUNTIME_KEY, payload
-            ),
+            self.processor_factory(),
+            send_splat_batch=self.splat_channels.send,
             fail_control=lambda reason: asyncio.create_task(
                 self._stop_control(reason)
             ),
@@ -394,7 +393,7 @@ class ItoApplication:
         if self.control_active and self.reconstruction_runtime is not None:
             self.reconstruction_runtime.process_frame(frame)
 
-    def _accept_camera_track(self, track: object, _control_key: str) -> None:
+    def _accept_camera_track(self, track: object) -> None:
         if getattr(track, "kind", None) != "video":
             return
         receiver = AiortcCameraTrackReceiver(self._process_sensor_frame)
@@ -418,7 +417,7 @@ class ItoApplication:
                 answer_sdp = await self.adapter.accept_pilot_input_offer(sdp)
             elif path in {WEBRTC_PATH_PILOT_INPUT, WEBRTC_PATH_SPLAT_BATCHES} and state is self.pilot:
                 answer_sdp = await self.live_paths.accept_offer(
-                    path=path, control_key=CONTROL_RUNTIME_KEY, sdp=sdp
+                    path=path, sdp=sdp
                 )
             elif (
                 path == WEBRTC_PATH_CAMERA_MEDIA
@@ -427,7 +426,7 @@ class ItoApplication:
                 and self.adapter.connection is state.websocket
             ):
                 answer_sdp = await self.live_paths.accept_offer(
-                    path=path, control_key=CONTROL_RUNTIME_KEY, sdp=sdp
+                    path=path, sdp=sdp
                 )
             else:
                 return
@@ -460,7 +459,7 @@ class ItoApplication:
             runtime.close()
         close_control = getattr(self.live_paths, "close_control", None)
         if close_control is not None:
-            await close_control(CONTROL_RUNTIME_KEY)
+            await close_control()
         if notify and self.pilot is not None:
             await self.pilot.websocket.send(
                 pack_envelope(

@@ -31,12 +31,11 @@ class FakeCameraMediaPublisher:
     def __init__(self):
         self.closed = []
 
-    async def create_offer(self, *, control_key, video_path, loop):
-        assert control_key == "control"
+    async def create_offer(self, *, video_path, loop):
         return "camera offer"
 
-    async def close_control(self, control_key):
-        self.closed.append(control_key)
+    async def close(self):
+        self.closed.append(True)
 
 
 def test_video_file_camera_reads_samples(tmp_path):
@@ -75,6 +74,6 @@ def test_remote_driver_starts_and_stops_without_robot_or_session_identity(tmp_pa
         )
         assert driver.control_active is False
         assert websocket.sent[-1]["type"] == TYPE_DRIVER_CONTROL_STOP_RESULT
-        assert publisher.closed == ["control"]
+        assert publisher.closed == [True]
 
     asyncio.run(scenario())

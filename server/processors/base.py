@@ -40,7 +40,7 @@ class ReconstructionProcessor(Protocol):
 
     capture_modality: str
 
-    def start(self, control_key: str) -> None:
+    def start(self) -> None:
         ...
 
     def process_frame(self, frame: ReconstructionFrame) -> Iterable[ProcessorSplatBatch]:

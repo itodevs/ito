@@ -6,8 +6,8 @@ control. There is no robot browser or allocation step.
 
 The client sends replaceable Pilot Input Snapshots and receives binary Splat
 Batches. It pauses outgoing robot input while its menu is open or reconstruction
-is stale. The configured local/remote robot placement is informational only and
-doesn't change the client workflow.
+is stale. Robot and reconstruction placement is neither visible to the client
+nor part of its workflow.
 
 Run tests inside the Dev Container:
 

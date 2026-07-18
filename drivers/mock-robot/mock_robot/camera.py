@@ -49,12 +49,7 @@ class VideoFileCamera:
             self._file = None
 
     def samples(self) -> Iterator[CameraSample]:
-        """Yield file chunks until EOF, looping when configured.
-
-        TODO 23 will consume these bytes through WebRTC H.264 media transport.
-        This class deliberately does not decode frames or implement a production
-        replay mode in the reconstruction module.
-        """
+        """Yield file chunks for diagnostics; WebRTC reads the video path directly."""
 
         if self._file is None:
             self.open()
@@ -68,4 +63,3 @@ class VideoFileCamera:
             if not self.loop:
                 break
             self._file.seek(0)
-

@@ -18,30 +18,30 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ServerLivePathAcceptor(Protocol):
-    async def accept_offer(self, *, path: str, control_key: str, sdp: str) -> str:
+    async def accept_offer(self, *, path: str, sdp: str) -> str:
         ...
 
 
 class MissingWebRtcStack:
-    async def accept_offer(self, *, path: str, control_key: str, sdp: str) -> str:
+    async def accept_offer(self, *, path: str, sdp: str) -> str:
         raise RuntimeError("aiortc is required for server-terminated WebRTC live paths")
 
 
-class SplatBatchChannelRegistry:
-    """Tracks the open Ito-to-client Splat Batch data channel."""
+class SplatBatchChannel:
+    """Tracks the one open Ito-to-client Splat Batch data channel."""
 
     def __init__(self) -> None:
-        self.channels: dict[str, object] = {}
+        self.channel: object | None = None
 
-    def attach(self, control_key: str, data_channel: object) -> None:
-        self.channels[control_key] = data_channel
+    def attach(self, data_channel: object) -> None:
+        self.channel = data_channel
 
-    def detach(self, control_key: str, data_channel: object | None = None) -> None:
-        if data_channel is None or self.channels.get(control_key) is data_channel:
-            self.channels.pop(control_key, None)
+    def detach(self, data_channel: object | None = None) -> None:
+        if data_channel is None or self.channel is data_channel:
+            self.channel = None
 
-    def send(self, control_key: str, payload: bytes) -> bool:
-        channel = self.channels.get(control_key)
+    def send(self, payload: bytes) -> bool:
+        channel = self.channel
         if channel is None or getattr(channel, "readyState", None) != "open":
             return False
         channel.send(payload)
@@ -56,10 +56,10 @@ class AiortcServerLivePaths:
     reconstruction integration attaches track/data-channel handlers here.
     """
 
-    on_camera_track: Callable[[object, str], Awaitable[None] | None] | None = None
+    on_camera_track: Callable[[object], Awaitable[None] | None] | None = None
     on_pilot_input: Callable[[Mapping[str, Any]], None] | None = None
-    on_splat_channel: Callable[[object, str], Awaitable[None] | None] | None = None
-    splat_channels: SplatBatchChannelRegistry | None = None
+    on_splat_channel: Callable[[object], Awaitable[None] | None] | None = None
+    splat_channels: SplatBatchChannel | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -69,9 +69,9 @@ class AiortcServerLivePaths:
         self._configuration_type = RTCConfiguration
         self._peer_connection_type = RTCPeerConnection
         self._session_description_type = RTCSessionDescription
-        self.peer_connections: dict[tuple[str, str], object] = {}
+        self.peer_connections: dict[str, object] = {}
 
-    async def accept_offer(self, *, path: str, control_key: str, sdp: str) -> str:
+    async def accept_offer(self, *, path: str, sdp: str) -> str:
         if path not in {
             WEBRTC_PATH_CAMERA_MEDIA,
             WEBRTC_PATH_PILOT_INPUT,
@@ -79,12 +79,15 @@ class AiortcServerLivePaths:
         }:
             raise ValueError(f"server cannot terminate WebRTC path {path}")
         pc = self._peer_connection_type(configuration=self._configuration_type(iceServers=[]))
-        self.peer_connections[(control_key, path)] = pc
+        previous = self.peer_connections.pop(path, None)
+        if previous is not None:
+            await previous.close()
+        self.peer_connections[path] = pc
 
         if path == WEBRTC_PATH_CAMERA_MEDIA and self.on_camera_track is not None:
             @pc.on("track")
             async def on_track(track: object) -> None:
-                result = self.on_camera_track(track, control_key)
+                result = self.on_camera_track(track)
                 if result is not None:
                     await result
 
@@ -103,13 +106,13 @@ class AiortcServerLivePaths:
             if self.splat_channels is not None:
                 @channel.on("open")
                 def on_open() -> None:
-                    self.splat_channels.attach(control_key, channel)
+                    self.splat_channels.attach(channel)
 
                 @channel.on("close")
                 def on_close() -> None:
-                    self.splat_channels.detach(control_key, channel)
+                    self.splat_channels.detach(channel)
             if self.on_splat_channel is not None:
-                result = self.on_splat_channel(channel, control_key)
+                result = self.on_splat_channel(channel)
                 if result is not None:
                     await result
 
@@ -120,16 +123,13 @@ class AiortcServerLivePaths:
         await _wait_for_ice_gathering_complete(pc)
         return pc.localDescription.sdp
 
-    async def close_control(self, control_key: str) -> None:
+    async def close_control(self) -> None:
         import asyncio
 
-        peers = [
-            self.peer_connections.pop(key)
-            for key in list(self.peer_connections)
-            if key[0] == control_key
-        ]
+        peers = list(self.peer_connections.values())
+        self.peer_connections.clear()
         if self.splat_channels is not None:
-            self.splat_channels.detach(control_key)
+            self.splat_channels.detach()
         await asyncio.gather(*(pc.close() for pc in peers), return_exceptions=True)
 
 

@@ -5,9 +5,8 @@ import { ItoPilotApp } from "../src/app.js";
 
 test("ready screen offers direct control without a robot catalog", () => {
   const buttons = [];
-  const labels = [];
   const app = {
-    endpoint: { robotReady: true, backend: "local" },
+    endpoint: { robotReady: true },
     ui: {
       panel(options) {
         assert.equal(options.title, "Ready");
@@ -16,9 +15,6 @@ test("ready screen offers direct control without a robot catalog", () => {
       button(_panel, options) {
         buttons.push(options);
       },
-      label(_panel, value) {
-        labels.push(value);
-      },
     },
     text: {
       t(key) {
@@ -26,7 +22,6 @@ test("ready screen offers direct control without a robot catalog", () => {
           "control.ready": "Ready",
           "control.start": "Start control",
           "control.settings": "Settings",
-          "connection.localBackend": "Robot integration is onboard.",
         }[key] || key;
       },
       displayReason() {
@@ -39,7 +34,6 @@ test("ready screen offers direct control without a robot catalog", () => {
   ItoPilotApp.prototype.showReady.call(app);
 
   assert.deepEqual(buttons.map((button) => button.action), ["control.start", "settings.open"]);
-  assert.equal(labels.some((label) => label.includes("Catalog")), false);
 });
 
 test("enterVr enters immediately when A-Frame has already loaded", async () => {

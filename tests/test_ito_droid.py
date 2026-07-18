@@ -16,6 +16,10 @@ from server.ito.protocol import (
     TYPE_DRIVER_CONTROL_START_RESULT,
     TYPE_DRIVER_CONTROL_STOP,
     TYPE_DRIVER_CONTROL_STOP_RESULT,
+    TYPE_WEBRTC_ANSWER,
+    TYPE_WEBRTC_OFFER,
+    WEBRTC_PATH_CAMERA_MEDIA,
+    WEBRTC_PATH_PILOT_INPUT,
     make_envelope,
     unpack_envelope,
 )
@@ -68,13 +72,21 @@ def test_driver_uses_newest_input_and_times_out_locally():
     angle = driver.process_control_tick(1 / 60)
     clock.now = 0.101
 
-    assert driver.process_control_tick(1 / 60) == angle
+    assert angle != driver.config.servo_neutral_degrees
+    assert driver.process_control_tick(1 / 60) == driver.config.servo_neutral_degrees
 
 
 def test_control_lifecycle_neutralizes_on_start_and_stop():
     async def scenario():
+        class LifecycleMedia(CameraMediaPublisher):
+            async def create_offer(self):
+                return "camera offer"
+
+            async def close(self):
+                pass
+
         servo = RecordingServo()
-        media = CameraMediaPublisher()
+        media = LifecycleMedia()
         driver = ItoDroidDriver(
             ItoDroidConfig(), servo_publisher=servo, media_publisher=media
         )
@@ -89,7 +101,8 @@ def test_control_lifecycle_neutralizes_on_start_and_stop():
         )
         assert driver.control_active is True
         assert media.active is True
-        assert websocket.sent[-1]["type"] == TYPE_DRIVER_CONTROL_START_RESULT
+        assert websocket.sent[-2]["type"] == TYPE_DRIVER_CONTROL_START_RESULT
+        assert websocket.sent[-1]["type"] == TYPE_WEBRTC_OFFER
 
         await driver.handle_control_stop(
             websocket,
@@ -111,3 +124,67 @@ def test_pilot_input_has_no_session_identity():
 
     assert snapshot["sequence"] == 2
     assert "sessionId" not in snapshot
+
+
+def test_driver_negotiates_pilot_input_and_camera_media():
+    class FakePilotInputReceiver:
+        async def accept_offer(self, *, sdp):
+            assert sdp == "pilot offer"
+            return "pilot answer"
+
+        async def close(self):
+            pass
+
+    class FakeMediaPublisher(CameraMediaPublisher):
+        async def create_offer(self):
+            return "camera offer"
+
+        async def accept_answer(self, *, sdp):
+            assert sdp == "camera answer"
+
+        async def close(self):
+            pass
+
+    async def scenario():
+        media = FakeMediaPublisher()
+        driver = ItoDroidDriver(
+            ItoDroidConfig(),
+            media_publisher=media,
+            pilot_input_webrtc=FakePilotInputReceiver(),
+        )
+        websocket = FakeWebSocket()
+        driver.camera_ready = True
+
+        await driver.handle_control_start(
+            websocket,
+            make_envelope(TYPE_DRIVER_CONTROL_START, {}, message_id="start"),
+        )
+        assert websocket.sent[-1]["type"] == TYPE_WEBRTC_OFFER
+        assert websocket.sent[-1]["payload"] == {
+            "path": WEBRTC_PATH_CAMERA_MEDIA,
+            "sdp": "camera offer",
+        }
+
+        await driver.handle_message(
+            websocket,
+            make_envelope(
+                TYPE_WEBRTC_OFFER,
+                {"path": WEBRTC_PATH_PILOT_INPUT, "sdp": "pilot offer"},
+                message_id="pilot",
+            ),
+        )
+        assert websocket.sent[-1]["type"] == TYPE_WEBRTC_ANSWER
+        assert websocket.sent[-1]["payload"] == {
+            "path": WEBRTC_PATH_PILOT_INPUT,
+            "sdp": "pilot answer",
+        }
+
+        await driver.handle_message(
+            websocket,
+            make_envelope(
+                TYPE_WEBRTC_ANSWER,
+                {"path": WEBRTC_PATH_CAMERA_MEDIA, "sdp": "camera answer"},
+            ),
+        )
+
+    asyncio.run(scenario())

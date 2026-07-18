@@ -32,7 +32,15 @@ docker compose up --build ito
 The default local adapter is an in-process integration seam. Robot-specific
 code supplies `ReconstructionFrame` values through
 `LocalRobotAdapter.publish_sensor_frame()` and receives pilot snapshots through
-its control sink. No loopback transport is involved.
+its control sink. The adapter owns pilot-input timeout, newest-input rate
+limiting, neutral stop, and an emergency-stop latch; robot-specific callbacks
+provide the actual actuation and neutralization. No loopback transport is
+involved.
+
+The stock container has no robot-specific hardware binding and therefore
+reports the local robot as not ready. A robot image wires the adapter callbacks
+and a `ReconstructionProcessor` factory into the same `ItoApplication`; this is
+still one process and introduces no local network boundary.
 
 For the external-driver fallback:
 

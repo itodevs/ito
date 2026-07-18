@@ -19,6 +19,10 @@ from server.ito.protocol import (
     TYPE_DRIVER_CONTROL_START_RESULT,
     TYPE_DRIVER_CONTROL_STOP,
     TYPE_DRIVER_CONTROL_STOP_RESULT,
+    TYPE_WEBRTC_ANSWER,
+    TYPE_WEBRTC_OFFER,
+    WEBRTC_PATH_CAMERA_MEDIA,
+    WEBRTC_PATH_PILOT_INPUT,
     make_envelope,
     pack_envelope,
     result_error,
@@ -30,6 +34,7 @@ from .config import ItoDroidConfig
 from .control import CameraPanController
 from .media import CameraMediaPublisher
 from .ros_io import CameraFrame, CameraFrameSink, LoggingServoPublisher, RosBridge, ServoPublisher
+from .webrtc import PilotInputWebRtcReceiver
 
 LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +46,7 @@ class ItoDroidDriver(CameraFrameSink):
         *,
         servo_publisher: ServoPublisher | None = None,
         media_publisher: CameraMediaPublisher | None = None,
+        pilot_input_webrtc: Any | None = None,
         clock: Any = time.monotonic,
     ) -> None:
         self.config = config
@@ -48,6 +54,7 @@ class ItoDroidDriver(CameraFrameSink):
         self.controller = CameraPanController(config)
         self.servo_publisher = servo_publisher or LoggingServoPublisher()
         self.media_publisher = media_publisher or CameraMediaPublisher()
+        self.pilot_input_webrtc = pilot_input_webrtc
         self.control_active = False
         self.camera_ready = False
         self.servo_ready = True
@@ -103,7 +110,7 @@ class ItoDroidDriver(CameraFrameSink):
                         await self.handle_message(websocket, unpack_envelope(frame))
             finally:
                 control_task.cancel()
-                self._stop_locally()
+                await self._stop_locally()
 
     async def _control_loop(self) -> None:
         period = 1 / self.config.control_tick_hz
@@ -118,6 +125,10 @@ class ItoDroidDriver(CameraFrameSink):
             await self.handle_control_start(websocket, envelope)
         elif envelope["type"] == TYPE_DRIVER_CONTROL_STOP:
             await self.handle_control_stop(websocket, envelope)
+        elif envelope["type"] == TYPE_WEBRTC_OFFER:
+            await self.handle_webrtc_offer(websocket, envelope)
+        elif envelope["type"] == TYPE_WEBRTC_ANSWER:
+            await self.handle_webrtc_answer(envelope)
 
     async def handle_control_start(self, websocket: Any, envelope: Mapping[str, Any]) -> None:
         if self.control_active:
@@ -152,20 +163,68 @@ class ItoDroidDriver(CameraFrameSink):
         await self._send_result(
             websocket, envelope, TYPE_DRIVER_CONTROL_START_RESULT, result_ok()
         )
+        await self._start_camera_media(websocket)
 
     async def handle_control_stop(self, websocket: Any, envelope: Mapping[str, Any]) -> None:
-        self._stop_locally()
+        await self._stop_locally()
         await self._send_result(
             websocket, envelope, TYPE_DRIVER_CONTROL_STOP_RESULT, result_ok()
         )
 
-    def _stop_locally(self) -> None:
+    async def handle_webrtc_offer(
+        self, websocket: Any, envelope: Mapping[str, Any]
+    ) -> None:
+        path = envelope["payload"].get("path")
+        sdp = envelope["payload"].get("sdp")
+        if path != WEBRTC_PATH_PILOT_INPUT or not isinstance(sdp, str):
+            return
+        if self.pilot_input_webrtc is None:
+            self.pilot_input_webrtc = PilotInputWebRtcReceiver(
+                self.receive_pilot_input_snapshot
+            )
+        answer = await self.pilot_input_webrtc.accept_offer(sdp=sdp)
+        await websocket.send(
+            pack_envelope(
+                make_envelope(
+                    TYPE_WEBRTC_ANSWER,
+                    {"path": WEBRTC_PATH_PILOT_INPUT, "sdp": answer},
+                    reply_to_message_id=envelope["messageId"],
+                )
+            )
+        )
+
+    async def handle_webrtc_answer(self, envelope: Mapping[str, Any]) -> None:
+        path = envelope["payload"].get("path")
+        sdp = envelope["payload"].get("sdp")
+        if path == WEBRTC_PATH_CAMERA_MEDIA and isinstance(sdp, str):
+            await self.media_publisher.accept_answer(sdp=sdp)
+
+    async def _start_camera_media(self, websocket: Any) -> None:
+        offer = await self.media_publisher.create_offer()
+        await websocket.send(
+            pack_envelope(
+                make_envelope(
+                    TYPE_WEBRTC_OFFER,
+                    {"path": WEBRTC_PATH_CAMERA_MEDIA, "sdp": offer},
+                )
+            )
+        )
+
+    async def _stop_locally(self) -> None:
         self.control_active = False
         self.media_publisher.stop()
+        await self.media_publisher.close()
+        if self.pilot_input_webrtc is not None:
+            await self.pilot_input_webrtc.close()
         try:
             self.neutralize_servo()
         except Exception as exc:
             LOGGER.error("Ito Droid safe neutralization failed: %s", exc)
+
+    async def emergency_stop(self) -> None:
+        """Robot-local emergency stop; it doesn't depend on Ito connectivity."""
+
+        await self._stop_locally()
 
     async def _send_result(
         self,

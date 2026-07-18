@@ -33,13 +33,13 @@ The client opens `/ws` on the same origin that served it.
 | Message | Direction | Purpose |
 | --- | --- | --- |
 | `connection.hello` | client → Ito | `{role: "pilotClient"}`. |
-| `connection.hello.result` | Ito → client | Backend placement, readiness, active state, and control configuration. |
+| `connection.hello.result` | Ito → client | Readiness, active state, and control configuration. |
 | `control.start` | client → Ito | Explicitly begin control. |
 | `control.start.result` | Ito → client | Confirms start and returns control configuration. |
 | `control.stop` | client → Ito | Stop control with an optional Display Reason. |
 | `control.stop.result` | Ito → client | Confirms the request was accepted. |
 | `control.stopped` | Ito → client | Final stopped state and reason. |
-| `robot.ready` | Ito → client | The configured remote driver became ready or unavailable. |
+| `robot.ready` | Ito → client | The configured robot became ready or unavailable. |
 | `webrtc.offer` / `webrtc.answer` | either | Non-trickle signaling for a live path. |
 
 Pilot live paths are:
