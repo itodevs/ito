@@ -1,11 +1,10 @@
-# Server Processors
+# Reconstruction processors
 
-This directory contains server-internal reconstruction algorithm modules.
+These modules run inside the Ito application boundary. A processor starts when
+control starts, accepts `ReconstructionFrame` values directly from local sensor
+ingress or decoded remote media, and yields binary-ready `ProcessorSplatBatch`
+values.
 
-These modules are part of the Ito Server codebase, not separately deployed Ito
-programs.
-
-All processors implement the interface in `base.py`: start a session, accept
-decoded `ReconstructionFrame` values, and yield `ProcessorSplatBatch` values.
-`null.py` is only an integration seam used before MASt3R-SLAM or MonoGS is
-selected; it is not the v1 reconstruction algorithm.
+`null.py` is only an integration seam; it is not the selected reconstruction
+algorithm. Native libraries, GPU runtimes, or a tightly managed model subprocess
+may implement this interface without becoming another deployed Ito service.

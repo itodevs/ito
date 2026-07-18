@@ -5,33 +5,32 @@
     "webxrUnavailable": "Immersive VR is not available in this browser.",
     "loading": "Loading..."
   },
-  "catalog": {
-    "title": "Robot Catalog",
-    "refresh": "Refresh",
-    "empty": "No robots are reporting yet.",
-    "acquire": "Pilot",
-    "unavailable": "Unavailable"
-  },
   "connection": {
     "connecting": "Connecting...",
     "connected": "Connected",
-    "failed": "Connection failed"
+    "failed": "Connection failed",
+    "retry": "Retry",
+    "localBackend": "Robot integration and reconstruction are running onboard.",
+    "remoteBackend": "Ito is connected to the robot's lightweight remote driver."
   },
-  "session": {
-    "connecting": "Connecting to {{name}}...",
-    "active": "Piloting {{name}}",
-    "ending": "Ending session...",
-    "ended": "Session ended",
-    "returnToCatalog": "Return to Catalog",
+  "control": {
+    "ready": "Ready",
+    "notReady": "Robot not ready",
+    "start": "Start control",
+    "starting": "Starting control...",
+    "active": "Control active",
+    "stopping": "Stopping control...",
+    "stopped": "Control stopped",
+    "returnToReady": "Return to ready",
     "visualPaused": "Visual feed lost. Robot controls paused.",
     "menu": "Menu",
     "resume": "Resume",
-    "end": "End Session",
+    "stop": "Stop control",
     "settings": "Settings"
   },
   "settings": {
     "title": "Settings",
-    "serverUrl": "Server",
+    "serverUrl": "Ito endpoint",
     "visualFreshnessTimeoutMs": "Visual timeout",
     "pilotInputRateHz": "Input rate",
     "splatBudget": "Splat budget",
@@ -39,49 +38,32 @@
     "save": "Save",
     "reset": "Reset"
   },
-  "enum": {
-    "robotType": {
-      "Mecha": "Mecha",
-      "Android Robot": "Android Robot",
-      "Droid": "Droid",
-      "Drone": "Drone",
-      "Car": "Car",
-      "Plane": "Plane"
-    },
-    "robotStatus": {
-      "Available": "Available",
-      "Occupied": "Occupied",
-      "Unavailable": "Unavailable"
-    }
-  },
   "reason": {
     "unknown": "Unknown reason.",
     "request": {
       "timeout": "The request timed out."
     },
     "robot": {
-      "unavailable": "The robot is unavailable.",
-      "driver_disconnected": "The robot driver disconnected.",
-      "driver_status_timeout": "The robot stopped reporting status."
+      "not_ready": "The configured robot is not ready."
     },
-    "session": {
-      "acquire": {
-        "robot_unavailable": "That robot is not available."
-      },
-      "ended": {
-        "requested": "The session was ended.",
-        "pilot_requested": "The pilot ended the session.",
-        "endpoint_disappeared": "A required endpoint disconnected.",
-        "reconstruction_failed": "Reconstruction failed."
-      },
-      "resume_unavailable": "The previous session can no longer be resumed."
+    "control": {
+      "stopped": {
+        "requested": "Control was stopped.",
+        "pilot_requested": "You stopped control.",
+        "pilot_disconnected": "The pilot connection was lost.",
+        "robot_driver_disconnected": "The robot driver disconnected.",
+        "reconstruction_failed": "Reconstruction failed.",
+        "transport_failed": "A live transport failed.",
+        "start_failed": "Control could not start."
+      }
     },
     "connection": {
-      "hello_required": "The server rejected the connection handshake.",
-      "invalid_role": "The server rejected the client role."
+      "hello_required": "Ito rejected the connection handshake.",
+      "invalid_role": "Ito rejected the client role.",
+      "pilot_already_connected": "Another pilot is connected."
     },
     "protocol": {
-      "invalid_message": "The server rejected an invalid protocol message.",
+      "invalid_message": "Ito rejected an invalid protocol message.",
       "version_mismatch": "The Ito protocol versions do not match."
     }
   }

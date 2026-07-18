@@ -3,36 +3,45 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Protocol
+import json
+import logging
+from typing import Any, Awaitable, Callable, Mapping, Protocol
 
-from .protocol import WEBRTC_PATH_CAMERA_MEDIA, WEBRTC_PATH_SPLAT_BATCHES
+from .protocol import (
+    PROTOCOL_VERSION,
+    WEBRTC_PATH_CAMERA_MEDIA,
+    WEBRTC_PATH_PILOT_INPUT,
+    WEBRTC_PATH_SPLAT_BATCHES,
+)
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ServerLivePathAcceptor(Protocol):
-    async def accept_offer(self, *, path: str, session_id: str, sdp: str) -> str:
+    async def accept_offer(self, *, path: str, control_key: str, sdp: str) -> str:
         ...
 
 
 class MissingWebRtcStack:
-    async def accept_offer(self, *, path: str, session_id: str, sdp: str) -> str:
+    async def accept_offer(self, *, path: str, control_key: str, sdp: str) -> str:
         raise RuntimeError("aiortc is required for server-terminated WebRTC live paths")
 
 
 class SplatBatchChannelRegistry:
-    """Tracks open server-to-client Splat Batch data channels by session."""
+    """Tracks the open Ito-to-client Splat Batch data channel."""
 
     def __init__(self) -> None:
         self.channels: dict[str, object] = {}
 
-    def attach(self, session_id: str, data_channel: object) -> None:
-        self.channels[session_id] = data_channel
+    def attach(self, control_key: str, data_channel: object) -> None:
+        self.channels[control_key] = data_channel
 
-    def detach(self, session_id: str, data_channel: object | None = None) -> None:
-        if data_channel is None or self.channels.get(session_id) is data_channel:
-            self.channels.pop(session_id, None)
+    def detach(self, control_key: str, data_channel: object | None = None) -> None:
+        if data_channel is None or self.channels.get(control_key) is data_channel:
+            self.channels.pop(control_key, None)
 
-    def send(self, session_id: str, payload: bytes) -> bool:
-        channel = self.channels.get(session_id)
+    def send(self, control_key: str, payload: bytes) -> bool:
+        channel = self.channels.get(control_key)
         if channel is None or getattr(channel, "readyState", None) != "open":
             return False
         channel.send(payload)
@@ -48,6 +57,7 @@ class AiortcServerLivePaths:
     """
 
     on_camera_track: Callable[[object, str], Awaitable[None] | None] | None = None
+    on_pilot_input: Callable[[Mapping[str, Any]], None] | None = None
     on_splat_channel: Callable[[object, str], Awaitable[None] | None] | None = None
     splat_channels: SplatBatchChannelRegistry | None = None
 
@@ -61,31 +71,45 @@ class AiortcServerLivePaths:
         self._session_description_type = RTCSessionDescription
         self.peer_connections: dict[tuple[str, str], object] = {}
 
-    async def accept_offer(self, *, path: str, session_id: str, sdp: str) -> str:
-        if path not in {WEBRTC_PATH_CAMERA_MEDIA, WEBRTC_PATH_SPLAT_BATCHES}:
+    async def accept_offer(self, *, path: str, control_key: str, sdp: str) -> str:
+        if path not in {
+            WEBRTC_PATH_CAMERA_MEDIA,
+            WEBRTC_PATH_PILOT_INPUT,
+            WEBRTC_PATH_SPLAT_BATCHES,
+        }:
             raise ValueError(f"server cannot terminate WebRTC path {path}")
         pc = self._peer_connection_type(configuration=self._configuration_type(iceServers=[]))
-        self.peer_connections[(session_id, path)] = pc
+        self.peer_connections[(control_key, path)] = pc
 
         if path == WEBRTC_PATH_CAMERA_MEDIA and self.on_camera_track is not None:
             @pc.on("track")
             async def on_track(track: object) -> None:
-                result = self.on_camera_track(track, session_id)
+                result = self.on_camera_track(track, control_key)
                 if result is not None:
                     await result
+
+        if path == WEBRTC_PATH_PILOT_INPUT and self.on_pilot_input is not None:
+            @pc.on("datachannel")
+            def on_data_channel(channel: object) -> None:
+                @channel.on("message")
+                def on_message(message: str | bytes) -> None:
+                    try:
+                        self.on_pilot_input(decode_pilot_input_snapshot(message))
+                    except ValueError as exc:
+                        LOGGER.warning("Ignoring invalid pilot input: %s", exc)
 
         if path == WEBRTC_PATH_SPLAT_BATCHES:
             channel = pc.createDataChannel("ito.splatBatches", ordered=True)
             if self.splat_channels is not None:
                 @channel.on("open")
                 def on_open() -> None:
-                    self.splat_channels.attach(session_id, channel)
+                    self.splat_channels.attach(control_key, channel)
 
                 @channel.on("close")
                 def on_close() -> None:
-                    self.splat_channels.detach(session_id, channel)
+                    self.splat_channels.detach(control_key, channel)
             if self.on_splat_channel is not None:
-                result = self.on_splat_channel(channel, session_id)
+                result = self.on_splat_channel(channel, control_key)
                 if result is not None:
                     await result
 
@@ -96,16 +120,16 @@ class AiortcServerLivePaths:
         await _wait_for_ice_gathering_complete(pc)
         return pc.localDescription.sdp
 
-    async def close_session(self, session_id: str) -> None:
+    async def close_control(self, control_key: str) -> None:
         import asyncio
 
         peers = [
             self.peer_connections.pop(key)
             for key in list(self.peer_connections)
-            if key[0] == session_id
+            if key[0] == control_key
         ]
         if self.splat_channels is not None:
-            self.splat_channels.detach(session_id)
+            self.splat_channels.detach(control_key)
         await asyncio.gather(*(pc.close() for pc in peers), return_exceptions=True)
 
 
@@ -122,3 +146,25 @@ async def _wait_for_ice_gathering_complete(peer_connection: object) -> None:
             complete.set()
 
     await complete.wait()
+
+
+def decode_pilot_input_snapshot(message: str | bytes) -> dict[str, Any]:
+    if isinstance(message, bytes):
+        message = message.decode("utf-8")
+    try:
+        payload = json.loads(message)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("pilot input isn't valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("pilot input must be an object")
+    if payload.get("protocolVersion") != PROTOCOL_VERSION:
+        raise ValueError(f"pilot input protocolVersion must be {PROTOCOL_VERSION}")
+    if not isinstance(payload.get("sequence"), int):
+        raise ValueError("pilot input requires an integer sequence")
+    if not isinstance(payload.get("timestampMs"), (int, float)):
+        raise ValueError("pilot input requires timestampMs")
+    if not isinstance(payload.get("headsetYawRad"), (int, float)):
+        raise ValueError("pilot input requires headsetYawRad")
+    if not isinstance(payload.get("controllers"), list):
+        raise ValueError("pilot input requires a controllers list")
+    return payload

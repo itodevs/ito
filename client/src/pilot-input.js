@@ -22,26 +22,25 @@ export class PilotInputLoop {
     this.enabled = false;
   }
 
-  maybeSend(frame, referenceSpace, sessionId) {
+  maybeSend(frame, referenceSpace) {
     if (!this.enabled || !this.transport?.canSend()) return null;
     const now = this.now();
     const intervalMs = 1000 / this.rateHz;
     if (now - this.lastSentAt < intervalMs) return null;
     const pose = frame.getViewerPose(referenceSpace);
     if (!pose) return null;
-    const snapshot = this.createSnapshot(pose, frame.session.inputSources, sessionId, now);
+    const snapshot = this.createSnapshot(pose, frame.session.inputSources, now);
     this.transport.sendSnapshot(snapshot);
     this.lastSentAt = now;
     return snapshot;
   }
 
-  createSnapshot(viewerPose, inputSources, sessionId, timestampMs = this.now()) {
+  createSnapshot(viewerPose, inputSources, timestampMs = this.now()) {
     const absoluteYaw = yawFromViewerPose(viewerPose);
     if (this.zeroYawRad === null) this.zeroYawRad = absoluteYaw;
     const headsetYawRad = normalizeRadians(absoluteYaw - this.zeroYawRad);
     return {
       protocolVersion: "ito.v1",
-      sessionId,
       sequence: ++this.sequence,
       timestampMs: Math.round(timestampMs),
       headsetYawRad,

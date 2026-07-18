@@ -37,10 +37,10 @@ def decode_pilot_input_snapshot(message: str | bytes) -> dict[str, Any]:
         raise ValueError("snapshot must be a JSON object")
     if payload.get("protocolVersion") != "ito.v1":
         raise ValueError("snapshot protocolVersion must be ito.v1")
-    if not isinstance(payload.get("sessionId"), str):
-        raise ValueError("snapshot requires sessionId")
     if not isinstance(payload.get("sequence"), int):
         raise ValueError("snapshot requires integer sequence")
     if not isinstance(payload.get("headsetYawRad"), (int, float)):
         raise ValueError("snapshot requires headsetYawRad")
+    if not isinstance(payload.get("controllers"), list):
+        raise ValueError("snapshot requires controllers")
     return payload

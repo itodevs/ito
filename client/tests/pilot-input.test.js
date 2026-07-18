@@ -3,13 +3,13 @@ import test from "node:test";
 
 import { PilotInputLoop } from "../src/pilot-input.js";
 
-test("pilot input snapshots use headset yaw relative to session start", () => {
+test("pilot input snapshots use headset yaw relative to control start", () => {
   let yaw = Math.PI / 4;
   const loop = new PilotInputLoop({ transport: null, now: () => 0 });
-  const first = loop.createSnapshot(poseWithYaw(yaw), [], "session-1", 0);
+  const first = loop.createSnapshot(poseWithYaw(yaw), [], 0);
 
   yaw = Math.PI / 2;
-  const second = loop.createSnapshot(poseWithYaw(yaw), [], "session-1", 16);
+  const second = loop.createSnapshot(poseWithYaw(yaw), [], 16);
 
   assert.equal(first.headsetYawRad, 0);
   assert.ok(Math.abs(second.headsetYawRad - Math.PI / 4) < 0.000001);
@@ -30,7 +30,6 @@ test("pilot input snapshots include controller full state", () => {
         },
       },
     ],
-    "session-1",
     0,
   );
 
@@ -40,6 +39,7 @@ test("pilot input snapshots include controller full state", () => {
     buttons: [{ pressed: true, touched: true, value: 1 }],
     axes: [0.1, -0.2],
   });
+  assert.equal("sessionId" in snapshot, false);
 });
 
 function poseWithYaw(yaw) {

@@ -3,28 +3,22 @@ import { decodeMessagePack, encodeMessagePack } from "./msgpack.js";
 export const PROTOCOL_VERSION = "ito.v1";
 
 export const MESSAGE_TYPES = Object.freeze({
-  CATALOG_GET: "catalog.get",
-  CATALOG_GET_RESULT: "catalog.get.result",
   CONNECTION_HELLO: "connection.hello",
   CONNECTION_HELLO_RESULT: "connection.hello.result",
-  SESSION_ACQUIRE: "session.acquire",
-  SESSION_ACQUIRE_RESULT: "session.acquire.result",
-  SESSION_END: "session.end",
-  SESSION_END_RESULT: "session.end.result",
-  SESSION_ENDED: "session.ended",
+  CONTROL_START: "control.start",
+  CONTROL_START_RESULT: "control.start.result",
+  CONTROL_STOP: "control.stop",
+  CONTROL_STOP_RESULT: "control.stop.result",
+  CONTROL_STOPPED: "control.stopped",
+  ROBOT_READY: "robot.ready",
   WEBRTC_OFFER: "webrtc.offer",
   WEBRTC_ANSWER: "webrtc.answer",
 });
 
 export const ROLE_PILOT_CLIENT = "pilotClient";
-export const ROBOT_STATUS_AVAILABLE = "Available";
-export const ROBOT_STATUS_OCCUPIED = "Occupied";
-export const ROBOT_STATUS_UNAVAILABLE = "Unavailable";
 
 export function makeMessageId() {
-  if (globalThis.crypto?.randomUUID) {
-    return globalThis.crypto.randomUUID();
-  }
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
@@ -36,8 +30,6 @@ export function makeEnvelope(type, payload = {}, options = {}) {
     payload,
   };
   if (options.replyToMessageId) envelope.replyToMessageId = options.replyToMessageId;
-  if (options.robotId) envelope.robotId = options.robotId;
-  if (options.sessionId) envelope.sessionId = options.sessionId;
   validateEnvelope(envelope);
   return envelope;
 }
@@ -72,11 +64,8 @@ export function validateEnvelope(envelope) {
   if (envelope.replyToMessageId !== undefined && typeof envelope.replyToMessageId !== "string") {
     throw new Error("replyToMessageId must be a string");
   }
-  if (envelope.robotId !== undefined && typeof envelope.robotId !== "string") {
-    throw new Error("robotId must be a string");
-  }
-  if (envelope.sessionId !== undefined && typeof envelope.sessionId !== "string") {
-    throw new Error("sessionId must be a string");
+  if ("robotId" in envelope || "sessionId" in envelope) {
+    throw new Error("robot and session identifiers aren't part of this protocol");
   }
 }
 

@@ -15,18 +15,18 @@ class NullReconstructionProcessor:
     """Consumes frames and emits no splats.
 
     This is a local integration seam, not the selected v1 algorithm. It lets the
-    server exercise media ingress, session failure handling, and Splat Batch
+        application exercise sensor ingress, failure handling, and Splat Batch
     encoding without claiming MASt3R-SLAM or MonoGS have been selected.
     """
 
     capture_modality = CAPTURE_MODALITY_MONOCULAR_RGB
 
     def __init__(self) -> None:
-        self.session_id: str | None = None
+        self.control_key: str | None = None
         self.frame_count = 0
 
-    def start(self, session_id: str) -> None:
-        self.session_id = session_id
+    def start(self, control_key: str) -> None:
+        self.control_key = control_key
         self.frame_count = 0
 
     def process_frame(self, frame: ReconstructionFrame) -> Iterable[ProcessorSplatBatch]:
@@ -37,4 +37,4 @@ class NullReconstructionProcessor:
         self.frame_count = 0
 
     def close(self) -> None:
-        self.session_id = None
+        self.control_key = None

@@ -1,40 +1,29 @@
 services:
-  ito-server:
+  ito:
     build:
       context: .
       dockerfile: server/Dockerfile
     environment:
-      ITO_SERVER_HOST: 0.0.0.0
-      ITO_SERVER_PORT: "8765"
+      ITO_HOST: 0.0.0.0
+      ITO_PORT: "8765"
+      ITO_ROBOT_BACKEND: ${ITO_ROBOT_BACKEND:-local}
       ITO_REQUEST_TIMEOUT_MS: "5000"
-      ITO_DRIVER_STATUS_WATCHDOG_MS: "2000"
-      ITO_SESSION_CLEANUP_TIMEOUT_MS: "30000"
       ITO_PILOT_INPUT_ORDERED: "false"
       ITO_PILOT_INPUT_MAX_RETRANSMITS: "0"
       ITO_SPLAT_BATCH_ORDERED: "true"
     ports:
       - "8765:8765"
 
-  pilot-client:
-    image: nginx:1.27-alpine
-    depends_on:
-      - ito-server
-    volumes:
-      - ./client:/usr/share/nginx/html:ro
-    ports:
-      - "8080:80"
-
-  mock-robot:
+  remote-driver:
+    profiles:
+      - remote
     build:
       context: .
       dockerfile: drivers/mock-robot/Dockerfile
     depends_on:
-      - ito-server
+      - ito
     environment:
-      ITO_SERVER_URL: ws://ito-server:8765
-      ITO_MOCK_ROBOT_ID: mock-robot-1
-      ITO_MOCK_ROBOT_NAME: Mock Robot
-      ITO_MOCK_ROBOT_STATUS_INTERVAL_MS: "1000"
+      ITO_URL: ws://ito:8765/ws
       ITO_MOCK_ROBOT_CAMERA_VIDEO: /data/mock-camera.mp4
       ITO_MOCK_ROBOT_CAMERA_LOOP: "true"
     volumes:
@@ -48,8 +37,6 @@ services:
       dockerfile: drivers/ito-droid/Dockerfile
     network_mode: host
     environment:
-      ITO_SERVER_URL: ${ITO_SERVER_URL:-ws://127.0.0.1:8765}
-      ITO_DROID_ROBOT_ID: ${ITO_DROID_ROBOT_ID:-ito-droid-1}
-      ITO_DROID_NAME: ${ITO_DROID_NAME:-Ito Droid}
+      ITO_URL: ${ITO_URL:-ws://127.0.0.1:8765/ws}
       ITO_DROID_ROS_CAMERA_TOPIC: ${ITO_DROID_ROS_CAMERA_TOPIC:-/image_raw}
       ITO_DROID_ROS_SERVO_COMMAND_TOPIC: ${ITO_DROID_ROS_SERVO_COMMAND_TOPIC:-/ito_droid/camera_pan/command}

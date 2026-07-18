@@ -56,17 +56,17 @@ export function normalizeSettings(settings) {
   return normalized;
 }
 
-export function mergeSessionConfig(settings, sessionConfig = {}) {
+export function mergeControlConfig(settings, controlConfig = {}) {
   return {
-    ...sessionConfig,
+    ...controlConfig,
     pilotInputRateHz: clampInteger(
-      sessionConfig.pilotInputRateHz ?? settings.pilotInputRateHz,
+      controlConfig.pilotInputRateHz ?? settings.pilotInputRateHz,
       settings.pilotInputRateHz,
       SETTING_LIMITS.pilotInputRateHz[0],
       SETTING_LIMITS.pilotInputRateHz[1],
     ),
     visualFreshnessTimeoutMs: clampInteger(
-      sessionConfig.visualFreshnessTimeoutMs ?? settings.visualFreshnessTimeoutMs,
+      controlConfig.visualFreshnessTimeoutMs ?? settings.visualFreshnessTimeoutMs,
       settings.visualFreshnessTimeoutMs,
       SETTING_LIMITS.visualFreshnessTimeoutMs[0],
       SETTING_LIMITS.visualFreshnessTimeoutMs[1],
@@ -84,7 +84,7 @@ function clampInteger(value, fallback, minimum, maximum) {
 
 function defaultServerUrl() {
   const location = globalThis.location;
-  if (!location?.host) return "ws://localhost:8765";
+  if (!location?.host) return "ws://localhost:8765/ws";
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
-  return `${scheme}//${location.hostname}:8765`;
+  return `${scheme}//${location.host}/ws`;
 }

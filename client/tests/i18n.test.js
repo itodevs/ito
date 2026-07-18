@@ -4,9 +4,9 @@ import test from "node:test";
 import { TextResources } from "../src/i18n.js";
 
 test("text resources resolve nested keys and template values", () => {
-  const text = new TextResources({ session: { active: "Piloting {{name}}" } });
+  const text = new TextResources({ control: { active: "Controlling {{name}}" } });
 
-  assert.equal(text.t("session.active", { name: "Dory" }), "Piloting Dory");
+  assert.equal(text.t("control.active", { name: "Dory" }), "Controlling Dory");
 });
 
 test("display reasons prefer localized resource keys and fall back to free text", () => {

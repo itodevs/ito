@@ -1,4 +1,4 @@
-"""Server-internal reconstruction processor interface."""
+"""Ito application reconstruction processor interface."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ CAPTURE_MODALITY_MONOCULAR_RGB = "monocularRgb"
 
 @dataclass(frozen=True)
 class ReconstructionFrame:
-    """Decoded camera frame passed from server media ingress to reconstruction."""
+    """Decoded camera frame passed from sensor ingress to reconstruction."""
 
     data: bytes
     timestamp_ms: int
@@ -36,11 +36,11 @@ class ProcessorSplatBatch:
 
 
 class ReconstructionProcessor(Protocol):
-    """Common interface for algorithms under server/processors/."""
+    """Common interface for reconstruction algorithms."""
 
     capture_modality: str
 
-    def start(self, session_id: str) -> None:
+    def start(self, control_key: str) -> None:
         ...
 
     def process_frame(self, frame: ReconstructionFrame) -> Iterable[ProcessorSplatBatch]:

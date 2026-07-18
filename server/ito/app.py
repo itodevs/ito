@@ -1,44 +1,38 @@
-"""Ito Server WebSocket control-plane implementation."""
+"""The single Ito application: web host, pilot endpoint, and robot control."""
 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import logging
-from time import monotonic
+import mimetypes
 from typing import Any
-from uuid import uuid4
+from urllib.parse import unquote, urlsplit
 
 from websockets.asyncio.server import ServerConnection, serve
+from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
+from websockets.http11 import Response
 
-from .config import ServerConfig
-from .media import AiortcCameraTrackReceiver
+from .config import ItoConfig
 from .protocol import (
     DisplayReason,
     PROTOCOL_VERSION,
     ProtocolError,
     ROLE_PILOT_CLIENT,
-    ROLE_ROBOT_DRIVER,
-    ROBOT_STATUS_AVAILABLE,
-    ROBOT_STATUS_OCCUPIED,
-    ROBOT_STATUS_UNAVAILABLE,
-    ROBOT_STATUSES,
-    ROBOT_TYPES,
-    TYPE_CATALOG_GET,
-    TYPE_CATALOG_GET_RESULT,
-    TYPE_DRIVER_SESSION_START,
-    TYPE_DRIVER_SESSION_START_RESULT,
-    TYPE_SESSION_ACQUIRE,
-    TYPE_SESSION_ACQUIRE_RESULT,
-    TYPE_SESSION_END,
-    TYPE_SESSION_END_RESULT,
-    TYPE_SESSION_ENDED,
-    TYPE_WEBRTC_ANSWER,
-    TYPE_WEBRTC_OFFER,
+    ROLE_REMOTE_ROBOT_DRIVER,
     TYPE_CONNECTION_HELLO,
     TYPE_CONNECTION_HELLO_RESULT,
-    TYPE_ROBOT_STATUS,
+    TYPE_CONTROL_START,
+    TYPE_CONTROL_START_RESULT,
+    TYPE_CONTROL_STOP,
+    TYPE_CONTROL_STOP_RESULT,
+    TYPE_CONTROL_STOPPED,
+    TYPE_ROBOT_READY,
+    TYPE_DRIVER_CONTROL_START_RESULT,
+    TYPE_DRIVER_CONTROL_STOP_RESULT,
+    TYPE_WEBRTC_ANSWER,
+    TYPE_WEBRTC_OFFER,
     WEBRTC_PATH_CAMERA_MEDIA,
     WEBRTC_PATH_PILOT_INPUT,
     WEBRTC_PATH_SPLAT_BATCHES,
@@ -48,480 +42,399 @@ from .protocol import (
     result_ok,
     unpack_envelope,
 )
-from .reconstruction import ReconstructionSessionRuntime
+from .reconstruction import ReconstructionRuntime
+from .media import AiortcCameraTrackReceiver
+from .robot import LocalRobotAdapter, RemoteRobotAdapter
 from .webrtc import MissingWebRtcStack, ServerLivePathAcceptor, SplatBatchChannelRegistry
 from server.processors.null import NullReconstructionProcessor
 
 LOGGER = logging.getLogger(__name__)
-
-SESSION_STATE_STARTING = "starting"
-SESSION_STATE_ACTIVE = "active"
-SESSION_STATE_ENDED = "ended"
+CONTROL_RUNTIME_KEY = "control"
 
 
 @dataclass(eq=False)
 class ConnectionState:
     websocket: ServerConnection
     role: str | None = None
-    robot_id: str | None = None
-    session_id: str | None = None
 
 
-@dataclass
-class DriverRecord:
-    robot_id: str
-    connection: ConnectionState | None = None
-    name: str | None = None
-    robot_type: str | None = None
-    driver_status: str = ROBOT_STATUS_UNAVAILABLE
-    availability_detail: dict[str, str] | None = None
-    last_status_at: float | None = None
-    duplicate: bool = False
-    occupied: bool = False
-
-    def catalog_entry(self, now: float, watchdog_seconds: float) -> dict[str, Any]:
-        status = self.effective_status(now, watchdog_seconds)
-        entry: dict[str, Any] = {
-            "robotId": self.robot_id,
-            "name": self.name or self.robot_id,
-            "type": self.robot_type or "Droid",
-            "status": status,
-        }
-        if self.availability_detail:
-            entry["availabilityDetail"] = self.availability_detail
-        elif status == ROBOT_STATUS_UNAVAILABLE:
-            entry["availabilityDetail"] = {"code": "robot.unavailable"}
-        return entry
-
-    def effective_status(self, now: float, watchdog_seconds: float) -> str:
-        if self.duplicate:
-            return ROBOT_STATUS_UNAVAILABLE
-        if self.occupied:
-            return ROBOT_STATUS_OCCUPIED
-        if self.connection is None or self.last_status_at is None:
-            return ROBOT_STATUS_UNAVAILABLE
-        if now - self.last_status_at > watchdog_seconds:
-            return ROBOT_STATUS_UNAVAILABLE
-        return self.driver_status
-
-
-@dataclass
-class SessionRecord:
-    session_id: str
-    robot_id: str
-    pilot_connection: ConnectionState | None
-    driver_connection: ConnectionState | None
-    session_config: dict[str, object]
-    state: str = SESSION_STATE_STARTING
-    created_at: float = field(default_factory=monotonic)
-    endpoint_missing_since: float | None = None
-    ended_reason: dict[str, str] | None = None
-    ended_by: str | None = None
-    clean: bool = False
-
-    def note_endpoint_missing(self) -> None:
-        if self.endpoint_missing_since is None:
-            self.endpoint_missing_since = monotonic()
-
-    def note_endpoint_present(self) -> None:
-        if self.pilot_connection is not None and self.driver_connection is not None:
-            self.endpoint_missing_since = None
-
-
-class ItoServer:
-    def __init__(self, config: ServerConfig | None = None) -> None:
-        self.config = config or ServerConfig.from_env()
-        self.connections: set[ConnectionState] = set()
-        self.drivers: dict[str, DriverRecord] = {}
-        self.sessions: dict[str, SessionRecord] = {}
-        self._pending_requests: dict[str, asyncio.Future[dict[str, Any]]] = {}
-        self._pending_webrtc_routes: dict[str, tuple[ConnectionState, str]] = {}
+class ItoApplication:
+    def __init__(
+        self,
+        config: ItoConfig | None = None,
+        *,
+        adapter: LocalRobotAdapter | RemoteRobotAdapter | None = None,
+    ) -> None:
+        self.config = config or ItoConfig.from_env()
+        if adapter is None:
+            adapter = (
+                RemoteRobotAdapter(request_timeout_ms=self.config.request_timeout_ms)
+                if self.config.robot_backend == "remote"
+                else LocalRobotAdapter()
+            )
+        self.adapter = adapter
+        self.pilot: ConnectionState | None = None
+        self.control_active = False
         self.splat_channels = SplatBatchChannelRegistry()
         self.live_paths: ServerLivePathAcceptor = MissingWebRtcStack()
-        self.reconstruction_runtimes: dict[str, ReconstructionSessionRuntime] = {}
-        self._acquisition_lock = asyncio.Lock()
-        self._watchdog_task: asyncio.Task[None] | None = None
-        self._cleanup_task: asyncio.Task[None] | None = None
+        self.reconstruction_runtime: ReconstructionRuntime | None = None
+        if isinstance(self.adapter, LocalRobotAdapter):
+            self.adapter.set_sensor_sink(self._process_sensor_frame)
         self._install_default_live_paths()
-
-    @property
-    def watchdog_seconds(self) -> float:
-        return self.config.driver_status_watchdog_ms / 1000
-
-    @property
-    def request_timeout_seconds(self) -> float:
-        return self.config.request_timeout_ms / 1000
-
-    @property
-    def session_cleanup_seconds(self) -> float:
-        return self.config.session_cleanup_timeout_ms / 1000
 
     def _install_default_live_paths(self) -> None:
         try:
             from .webrtc import AiortcServerLivePaths
-        except ImportError:  # pragma: no cover - module is local
-            return
-        try:
+
             self.live_paths = AiortcServerLivePaths(
                 on_camera_track=self._accept_camera_track,
+                on_pilot_input=(
+                    self.adapter.receive_pilot_input
+                    if isinstance(self.adapter, LocalRobotAdapter)
+                    else None
+                ),
                 splat_channels=self.splat_channels,
             )
         except RuntimeError:
             self.live_paths = MissingWebRtcStack()
 
-    def _accept_camera_track(self, track: object, session_id: str) -> None:
-        if getattr(track, "kind", None) != "video":
-            return
-        runtime = self._reconstruction_runtime(session_id)
-        receiver = AiortcCameraTrackReceiver(runtime.process_frame)
-        asyncio.create_task(receiver.consume(track))
-
-    def _reconstruction_runtime(self, session_id: str) -> ReconstructionSessionRuntime:
-        runtime = self.reconstruction_runtimes.get(session_id)
-        if runtime is not None:
-            return runtime
-        runtime = ReconstructionSessionRuntime(
-            session_id,
-            NullReconstructionProcessor(),
-            send_splat_batch=lambda payload: self.splat_channels.send(session_id, payload),
-            fail_session=lambda reason: asyncio.create_task(
-                self._fail_session_from_reconstruction(session_id, reason)
-            ),
-        )
-        runtime.start()
-        self.reconstruction_runtimes[session_id] = runtime
-        return runtime
-
-    async def _fail_session_from_reconstruction(self, session_id: str, reason: dict[str, str]) -> None:
-        session = self.sessions.get(session_id)
-        if session is None or session.state == SESSION_STATE_ENDED:
-            return
-        await self._end_session(
-            session,
-            reason=reason,
-            ended_by="server",
-            clean=False,
-            request_driver_end=True,
-        )
-
     async def serve_forever(self) -> None:
-        LOGGER.info("Starting Ito Server on %s:%s", self.config.host, self.config.port)
-        self._watchdog_task = asyncio.create_task(self._watchdog_loop())
-        self._cleanup_task = asyncio.create_task(self._session_cleanup_loop())
+        LOGGER.info(
+            "Starting Ito application on http://%s:%s with %s robot adapter",
+            self.config.host,
+            self.config.port,
+            self.config.robot_backend,
+        )
+        async with serve(
+            self._handle_connection,
+            self.config.host,
+            self.config.port,
+            process_request=self.process_http_request,
+        ):
+            await asyncio.Future()
+
+    async def process_http_request(self, _connection: object, request: object) -> Response | None:
+        request_path = urlsplit(request.path).path
+        if request_path == "/ws":
+            return None
+        relative_path = unquote(request_path).lstrip("/") or "index.html"
+        client_dir = self.config.client_dir.resolve()
+        candidate = (client_dir / relative_path).resolve()
+        if client_dir not in candidate.parents and candidate != client_dir:
+            return self._http_response(404, b"Not found", "text/plain; charset=utf-8")
+        if candidate.is_dir():
+            candidate = candidate / "index.html"
         try:
-            async with serve(self._handle_connection, self.config.host, self.config.port):
-                await asyncio.Future()
-        finally:
-            self._watchdog_task.cancel()
-            self._cleanup_task.cancel()
+            body = candidate.read_bytes()
+        except (FileNotFoundError, IsADirectoryError, PermissionError):
+            return self._http_response(404, b"Not found", "text/plain; charset=utf-8")
+        content_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+        if content_type.startswith("text/") or content_type in {"application/javascript", "application/json"}:
+            content_type += "; charset=utf-8"
+        return self._http_response(200, body, content_type)
+
+    @staticmethod
+    def _http_response(status: int, body: bytes, content_type: str) -> Response:
+        reason = "OK" if status == 200 else "Not Found"
+        return Response(
+            status,
+            reason,
+            Headers(
+                {
+                    "Content-Type": content_type,
+                    "Content-Length": str(len(body)),
+                    "Cache-Control": "no-cache",
+                }
+            ),
+            body,
+        )
 
     async def _handle_connection(self, websocket: ServerConnection) -> None:
-        state = ConnectionState(websocket=websocket)
-        self.connections.add(state)
+        state = ConnectionState(websocket)
         try:
             async for frame in websocket:
                 await self._handle_frame(state, frame)
         except ConnectionClosed:
             pass
         finally:
-            self.connections.discard(state)
-            if state.role == ROLE_ROBOT_DRIVER and state.robot_id:
-                record = self.drivers.get(state.robot_id)
-                if record and record.connection is state:
-                    record.connection = None
-                    record.driver_status = ROBOT_STATUS_UNAVAILABLE
-                    record.availability_detail = {"code": "robot.unavailable.driver_disconnected"}
-            self._mark_connection_disappeared(state)
+            await self._disconnect(state)
+
+    async def _disconnect(self, state: ConnectionState) -> None:
+        if self.pilot is state:
+            await self._stop_control(
+                {"code": "control.stopped.pilot_disconnected"}, notify=False
+            )
+            self.pilot = None
+        if (
+            state.role == ROLE_REMOTE_ROBOT_DRIVER
+            and isinstance(self.adapter, RemoteRobotAdapter)
+            and self.adapter.connection is state.websocket
+        ):
+            self.adapter.detach(state.websocket)
+            await self._notify_robot_ready(False)
+            await self._stop_control(
+                {"code": "control.stopped.robot_driver_disconnected"}
+            )
 
     async def _handle_frame(self, state: ConnectionState, frame: bytes | str) -> None:
         if not isinstance(frame, bytes):
-            await self._send_error(state, TYPE_CONNECTION_HELLO_RESULT, None, "protocol.invalid_frame")
+            await self._send_error(
+                state, TYPE_CONNECTION_HELLO_RESULT, None, "protocol.invalid_frame"
+            )
             return
         try:
             envelope = unpack_envelope(frame)
-        except ProtocolError as exc:
-            LOGGER.warning("Rejecting invalid Ito envelope: %s", exc)
-            await self._send_error(state, TYPE_CONNECTION_HELLO_RESULT, None, "protocol.invalid_message")
+        except ProtocolError:
+            await self._send_error(
+                state, TYPE_CONNECTION_HELLO_RESULT, None, "protocol.invalid_message"
+            )
             return
-
         if state.role is None and envelope["type"] != TYPE_CONNECTION_HELLO:
-            await self._send_error(state, TYPE_CONNECTION_HELLO_RESULT, envelope["messageId"], "connection.hello_required")
+            await self._send_error(
+                state,
+                TYPE_CONNECTION_HELLO_RESULT,
+                envelope["messageId"],
+                "connection.hello_required",
+            )
             return
 
-        if envelope["type"] == TYPE_CONNECTION_HELLO:
+        message_type = envelope["type"]
+        if message_type == TYPE_CONNECTION_HELLO:
             await self._handle_hello(state, envelope)
-        elif envelope["type"] in {TYPE_DRIVER_SESSION_START_RESULT, TYPE_SESSION_END_RESULT}:
-            self._handle_response(envelope)
-        elif envelope["type"] == TYPE_ROBOT_STATUS:
-            self._handle_robot_status(state, envelope)
-        elif envelope["type"] == TYPE_CATALOG_GET:
-            await self._handle_catalog_get(state, envelope)
-        elif envelope["type"] == TYPE_SESSION_ACQUIRE:
-            await self._handle_session_acquire(state, envelope)
-        elif envelope["type"] == TYPE_SESSION_END:
-            await self._handle_session_end(state, envelope)
-        elif envelope["type"] == TYPE_WEBRTC_OFFER:
+        elif message_type == TYPE_CONTROL_START:
+            await self._handle_control_start(state, envelope)
+        elif message_type == TYPE_CONTROL_STOP:
+            await self._handle_control_stop(state, envelope)
+        elif (
+            message_type in {
+            TYPE_DRIVER_CONTROL_START_RESULT,
+            TYPE_DRIVER_CONTROL_STOP_RESULT,
+            TYPE_WEBRTC_ANSWER,
+            }
+            and state.role == ROLE_REMOTE_ROBOT_DRIVER
+            and isinstance(self.adapter, RemoteRobotAdapter)
+            and self.adapter.connection is state.websocket
+        ):
+            self.adapter.handle_response(envelope)
+        elif message_type == TYPE_WEBRTC_OFFER:
             await self._handle_webrtc_offer(state, envelope)
-        elif envelope["type"] == TYPE_WEBRTC_ANSWER:
-            await self._handle_webrtc_answer(state, envelope)
         else:
-            result_type = {
-                TYPE_SESSION_ACQUIRE: TYPE_SESSION_ACQUIRE_RESULT,
-                TYPE_SESSION_END: TYPE_SESSION_END_RESULT,
-            }.get(envelope["type"], TYPE_CONNECTION_HELLO_RESULT)
-            await self._send_result(
+            await self._send_error(
                 state,
-                result_type,
+                TYPE_CONNECTION_HELLO_RESULT,
                 envelope["messageId"],
-                result_error(DisplayReason(code="protocol.unsupported_message")),
+                "protocol.unsupported_message",
             )
 
     async def _handle_hello(self, state: ConnectionState, envelope: dict[str, Any]) -> None:
-        payload = envelope["payload"]
-        role = payload.get("role")
-        if role == ROLE_ROBOT_DRIVER:
-            robot_id = payload.get("robotId") or envelope.get("robotId")
-            if not isinstance(robot_id, str) or not robot_id:
-                await self._send_error(state, TYPE_CONNECTION_HELLO_RESULT, envelope["messageId"], "connection.robot_id_required")
-                return
-            state.role = role
-            state.robot_id = robot_id
-            record = self.drivers.setdefault(robot_id, DriverRecord(robot_id=robot_id))
-            if record.connection is not None and record.connection is not state:
-                record.duplicate = True
-                record.connection = None
-                LOGGER.error("Duplicate robotId reported: %s", robot_id)
-            elif not record.duplicate:
-                record.connection = state
-                session = self._active_session_for_robot(robot_id)
-                if session and session.driver_connection is None:
-                    session.driver_connection = state
-                    state.session_id = session.session_id
-                    session.note_endpoint_present()
-            await self._send_result(state, TYPE_CONNECTION_HELLO_RESULT, envelope["messageId"], result_ok({"protocolVersion": PROTOCOL_VERSION, "role": role}))
+        role = envelope["payload"].get("role")
+        if role == ROLE_REMOTE_ROBOT_DRIVER:
+            await self._handle_remote_driver_hello(state, envelope)
             return
-        if role == ROLE_PILOT_CLIENT:
-            requested_session_id = payload.get("sessionId")
-            if requested_session_id is not None:
-                if not isinstance(requested_session_id, str):
-                    await self._send_error(state, TYPE_CONNECTION_HELLO_RESULT, envelope["messageId"], "connection.invalid_session")
-                    return
-                session = self.sessions.get(requested_session_id)
-                if session is None or session.state != SESSION_STATE_ACTIVE:
-                    await self._send_error(state, TYPE_CONNECTION_HELLO_RESULT, envelope["messageId"], "session.resume_unavailable")
-                    return
-                state.role = role
-                state.session_id = requested_session_id
-                session.pilot_connection = state
-                session.note_endpoint_present()
+        if role != ROLE_PILOT_CLIENT:
+            await self._send_error(
+                state,
+                TYPE_CONNECTION_HELLO_RESULT,
+                envelope["messageId"],
+                "connection.invalid_role",
+            )
+            return
+        if self.pilot is not None and self.pilot is not state:
+            await self._send_error(
+                state,
+                TYPE_CONNECTION_HELLO_RESULT,
+                envelope["messageId"],
+                "connection.pilot_already_connected",
+            )
+            return
+        state.role = ROLE_PILOT_CLIENT
+        self.pilot = state
+        await self._send_result(
+            state,
+            TYPE_CONNECTION_HELLO_RESULT,
+            envelope["messageId"],
+            result_ok(
+                {
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "backend": self.config.robot_backend,
+                    "robotReady": self.adapter.ready,
+                    "controlActive": self.control_active,
+                    "controlConfig": self.config.control_config_payload(),
+                }
+            ),
+        )
+
+    async def _handle_remote_driver_hello(
+        self, state: ConnectionState, envelope: dict[str, Any]
+    ) -> None:
+        if not isinstance(self.adapter, RemoteRobotAdapter):
+            await self._send_error(
+                state,
+                TYPE_CONNECTION_HELLO_RESULT,
+                envelope["messageId"],
+                "connection.remote_driver_not_configured",
+            )
+            return
+        if self.adapter.connection not in {None, state.websocket}:
+            await self._send_error(
+                state,
+                TYPE_CONNECTION_HELLO_RESULT,
+                envelope["messageId"],
+                "connection.remote_driver_already_connected",
+            )
+            return
+        ready = envelope["payload"].get("ready")
+        if not isinstance(ready, bool):
+            await self._send_error(
+                state,
+                TYPE_CONNECTION_HELLO_RESULT,
+                envelope["messageId"],
+                "connection.remote_driver_ready_required",
+            )
+            return
+        state.role = ROLE_REMOTE_ROBOT_DRIVER
+        self.adapter.attach(state.websocket, ready=ready)
+        await self._send_result(
+            state,
+            TYPE_CONNECTION_HELLO_RESULT,
+            envelope["messageId"],
+            result_ok({"protocolVersion": PROTOCOL_VERSION}),
+        )
+        await self._notify_robot_ready(ready)
+
+    async def _handle_control_start(
+        self, state: ConnectionState, envelope: dict[str, Any]
+    ) -> None:
+        if state is not self.pilot:
+            await self._send_error(
+                state,
+                TYPE_CONTROL_START_RESULT,
+                envelope["messageId"],
+                "control.pilot_required",
+            )
+            return
+        if not self.adapter.ready:
+            await self._send_error(
+                state,
+                TYPE_CONTROL_START_RESULT,
+                envelope["messageId"],
+                "robot.not_ready",
+            )
+            return
+        if not self.control_active:
+            self._start_reconstruction()
+            try:
+                await _maybe_await(self.adapter.start_control())
+            except Exception as exc:
+                LOGGER.warning("Robot adapter refused control start: %s", exc)
+                try:
+                    await _maybe_await(self.adapter.stop_control())
+                except Exception:
+                    LOGGER.exception("Robot adapter cleanup failed after start refusal")
+                runtime = self.reconstruction_runtime
+                self.reconstruction_runtime = None
+                if runtime is not None:
+                    runtime.close()
                 await self._send_result(
                     state,
-                    TYPE_CONNECTION_HELLO_RESULT,
+                    TYPE_CONTROL_START_RESULT,
                     envelope["messageId"],
-                    result_ok(
-                        {
-                            "protocolVersion": PROTOCOL_VERSION,
-                            "role": role,
-                            "sessionResumed": True,
-                            "sessionConfig": session.session_config,
-                        }
+                    result_error(
+                        DisplayReason(code="control.start_failed", text=str(exc))
                     ),
                 )
                 return
-            state.role = role
-            await self._send_result(state, TYPE_CONNECTION_HELLO_RESULT, envelope["messageId"], result_ok({"protocolVersion": PROTOCOL_VERSION, "role": role}))
-            return
-        await self._send_error(state, TYPE_CONNECTION_HELLO_RESULT, envelope["messageId"], "connection.invalid_role")
-
-    def _handle_response(self, envelope: dict[str, Any]) -> None:
-        reply_to = envelope.get("replyToMessageId")
-        if not isinstance(reply_to, str):
-            LOGGER.warning("Ignoring response without replyToMessageId: %s", envelope["type"])
-            return
-        pending = self._pending_requests.get(reply_to)
-        if pending is None or pending.done():
-            LOGGER.warning("Ignoring response for unknown request: %s", reply_to)
-            return
-        pending.set_result(envelope)
-
-    def _handle_robot_status(self, state: ConnectionState, envelope: dict[str, Any]) -> None:
-        if state.role != ROLE_ROBOT_DRIVER or not state.robot_id:
-            LOGGER.warning("Ignoring robot.status from non-driver connection")
-            return
-        payload = envelope["payload"]
-        if payload.get("status") not in ROBOT_STATUSES or payload.get("type") not in ROBOT_TYPES or not isinstance(payload.get("name"), str):
-            LOGGER.warning("Ignoring invalid robot.status from %s", state.robot_id)
-            return
-        record = self.drivers.setdefault(state.robot_id, DriverRecord(robot_id=state.robot_id))
-        if record.duplicate:
-            return
-        record.connection = state
-        record.name = payload["name"]
-        record.robot_type = payload["type"]
-        record.driver_status = payload["status"]
-        detail = payload.get("availabilityDetail")
-        record.availability_detail = detail if isinstance(detail, dict) else None
-        record.last_status_at = monotonic()
-
-    async def _handle_catalog_get(self, state: ConnectionState, envelope: dict[str, Any]) -> None:
-        if state.role != ROLE_PILOT_CLIENT:
-            await self._send_error(state, TYPE_CATALOG_GET_RESULT, envelope["messageId"], "catalog.pilot_client_required")
-            return
-        include_unavailable = envelope["payload"].get("includeUnavailable", True)
-        now = monotonic()
-        robots = [r.catalog_entry(now, self.watchdog_seconds) for r in self.drivers.values()]
-        if not include_unavailable:
-            robots = [r for r in robots if r["status"] != ROBOT_STATUS_UNAVAILABLE]
-        await self._send_result(state, TYPE_CATALOG_GET_RESULT, envelope["messageId"], result_ok({"robots": robots}))
-
-    async def _handle_session_acquire(self, state: ConnectionState, envelope: dict[str, Any]) -> None:
-        if state.role != ROLE_PILOT_CLIENT:
-            await self._send_error(state, TYPE_SESSION_ACQUIRE_RESULT, envelope["messageId"], "session.acquire.pilot_client_required")
-            return
-        robot_id = envelope["payload"].get("robotId") or envelope.get("robotId")
-        if not isinstance(robot_id, str) or not robot_id:
-            await self._send_error(state, TYPE_SESSION_ACQUIRE_RESULT, envelope["messageId"], "session.acquire.robot_id_required")
-            return
-
-        async with self._acquisition_lock:
-            record = self.drivers.get(robot_id)
-            now = monotonic()
-            if record is None or record.effective_status(now, self.watchdog_seconds) != ROBOT_STATUS_AVAILABLE or record.connection is None:
-                await self._send_error(state, TYPE_SESSION_ACQUIRE_RESULT, envelope["messageId"], "session.acquire.robot_unavailable")
-                return
-
-            record.occupied = True
-            session_id = self._make_session_id()
-            session_config = self.config.session_config_payload()
-            session = SessionRecord(
-                session_id=session_id,
-                robot_id=robot_id,
-                pilot_connection=state,
-                driver_connection=record.connection,
-                session_config=session_config,
-            )
-            self.sessions[session_id] = session
-
-            start_result = await self._request_driver_session_start(record.connection, robot_id, session_id, session_config)
-            if not start_result["payload"].get("ok"):
-                self._release_failed_acquisition(session)
-                await self._send_result(state, TYPE_SESSION_ACQUIRE_RESULT, envelope["messageId"], start_result["payload"])
-                return
-
-            value = start_result["payload"].get("value", {})
-            if value.get("sessionId") != session_id:
-                self._release_failed_acquisition(session)
-                await self._send_error(state, TYPE_SESSION_ACQUIRE_RESULT, envelope["messageId"], "driver.session_start.invalid_session")
-                return
-
-            session.state = SESSION_STATE_ACTIVE
-            state.session_id = session_id
-            record.connection.session_id = session_id
-            await self._send_result(
-                state,
-                TYPE_SESSION_ACQUIRE_RESULT,
-                envelope["messageId"],
-                result_ok(
-                    {
-                        "sessionId": session_id,
-                        "robotId": robot_id,
-                        "sessionConfig": session_config,
-                    }
-                ),
-            )
-
-    async def _request_driver_session_start(
-        self,
-        driver: ConnectionState,
-        robot_id: str,
-        session_id: str,
-        session_config: dict[str, object],
-    ) -> dict[str, Any]:
-        request = make_envelope(
-            TYPE_DRIVER_SESSION_START,
-            {"sessionId": session_id, "sessionConfig": session_config},
-            robot_id=robot_id,
-            session_id=session_id,
+            self.control_active = True
+        await self._send_result(
+            state,
+            TYPE_CONTROL_START_RESULT,
+            envelope["messageId"],
+            result_ok({"controlConfig": self.config.control_config_payload()}),
         )
-        future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
-        self._pending_requests[request["messageId"]] = future
-        try:
-            await driver.websocket.send(pack_envelope(request))
-            return await asyncio.wait_for(future, timeout=self.request_timeout_seconds)
-        except TimeoutError:
-            return make_envelope(
-                TYPE_DRIVER_SESSION_START_RESULT,
-                result_error(DisplayReason(code="request.timeout")),
-                reply_to_message_id=request["messageId"],
-                robot_id=robot_id,
-                session_id=session_id,
+
+    async def _handle_control_stop(
+        self, state: ConnectionState, envelope: dict[str, Any]
+    ) -> None:
+        if state is not self.pilot:
+            await self._send_error(
+                state,
+                TYPE_CONTROL_STOP_RESULT,
+                envelope["messageId"],
+                "control.pilot_required",
             )
-        finally:
-            self._pending_requests.pop(request["messageId"], None)
-
-    def _release_failed_acquisition(self, session: SessionRecord) -> None:
-        self.sessions.pop(session.session_id, None)
-        record = self.drivers.get(session.robot_id)
-        if record:
-            record.occupied = False
-        if session.pilot_connection and session.pilot_connection.session_id == session.session_id:
-            session.pilot_connection.session_id = None
-        if session.driver_connection and session.driver_connection.session_id == session.session_id:
-            session.driver_connection.session_id = None
-
-    async def _handle_session_end(self, state: ConnectionState, envelope: dict[str, Any]) -> None:
-        session_id = envelope.get("sessionId") or state.session_id
-        if not isinstance(session_id, str) or session_id not in self.sessions:
-            await self._send_error(state, TYPE_SESSION_END_RESULT, envelope["messageId"], "session.end.unknown_session")
             return
-        session = self.sessions[session_id]
-        if session.state == SESSION_STATE_ENDED:
-            await self._send_result(state, TYPE_SESSION_END_RESULT, envelope["messageId"], result_ok({"sessionId": session_id}))
-            return
-        if state not in {session.pilot_connection, session.driver_connection}:
-            await self._send_error(state, TYPE_SESSION_END_RESULT, envelope["messageId"], "session.end.endpoint_required")
-            return
-
         reason = envelope["payload"].get("reason")
         if not isinstance(reason, dict):
-            reason = {"code": "session.ended.requested"}
-        clean = bool(envelope["payload"].get("clean", False))
-        ended_by = state.role or "server"
+            reason = {"code": "control.stopped.pilot_requested"}
+        await self._send_result(
+            state,
+            TYPE_CONTROL_STOP_RESULT,
+            envelope["messageId"],
+            result_ok(),
+        )
+        await self._stop_control(reason)
 
-        await self._send_result(state, TYPE_SESSION_END_RESULT, envelope["messageId"], result_ok({"sessionId": session_id}))
-        await self._end_session(session, reason=reason, ended_by=ended_by, clean=clean, request_driver_end=state is not session.driver_connection)
+    def _start_reconstruction(self) -> None:
+        if self.reconstruction_runtime is not None:
+            return
+        runtime = ReconstructionRuntime(
+            CONTROL_RUNTIME_KEY,
+            NullReconstructionProcessor(),
+            send_splat_batch=lambda payload: self.splat_channels.send(
+                CONTROL_RUNTIME_KEY, payload
+            ),
+            fail_control=lambda reason: asyncio.create_task(
+                self._stop_control(reason)
+            ),
+        )
+        runtime.start()
+        self.reconstruction_runtime = runtime
 
-    async def _handle_webrtc_offer(self, state: ConnectionState, envelope: dict[str, Any]) -> None:
-        session = self._session_for_live_path(state, envelope)
-        if session is None:
-            LOGGER.warning("Ignoring WebRTC offer for unknown or inactive session")
+    def _process_sensor_frame(self, frame: object) -> None:
+        if self.control_active and self.reconstruction_runtime is not None:
+            self.reconstruction_runtime.process_frame(frame)
+
+    def _accept_camera_track(self, track: object, _control_key: str) -> None:
+        if getattr(track, "kind", None) != "video":
             return
-        path = envelope["payload"]["path"]
-        if path == WEBRTC_PATH_PILOT_INPUT:
-            await self._relay_pilot_input_offer(state, session, envelope)
+        receiver = AiortcCameraTrackReceiver(self._process_sensor_frame)
+        asyncio.create_task(receiver.consume(track))
+
+    async def _handle_webrtc_offer(
+        self, state: ConnectionState, envelope: dict[str, Any]
+    ) -> None:
+        if not self.control_active:
             return
-        if path not in {WEBRTC_PATH_CAMERA_MEDIA, WEBRTC_PATH_SPLAT_BATCHES}:
-            LOGGER.warning("Ignoring unsupported WebRTC path %s", path)
-            return
-        if (path == WEBRTC_PATH_CAMERA_MEDIA and state is not session.driver_connection) or (
-            path == WEBRTC_PATH_SPLAT_BATCHES and state is not session.pilot_connection
-        ):
-            LOGGER.warning("Ignoring WebRTC %s offer from wrong endpoint", path)
+        path = envelope["payload"].get("path")
+        sdp = envelope["payload"].get("sdp")
+        if not isinstance(sdp, str):
             return
         try:
-            answer_sdp = await self.live_paths.accept_offer(
-                path=path,
-                session_id=session.session_id,
-                sdp=envelope["payload"]["sdp"],
-            )
+            if (
+                path == WEBRTC_PATH_PILOT_INPUT
+                and state is self.pilot
+                and isinstance(self.adapter, RemoteRobotAdapter)
+            ):
+                answer_sdp = await self.adapter.accept_pilot_input_offer(sdp)
+            elif path in {WEBRTC_PATH_PILOT_INPUT, WEBRTC_PATH_SPLAT_BATCHES} and state is self.pilot:
+                answer_sdp = await self.live_paths.accept_offer(
+                    path=path, control_key=CONTROL_RUNTIME_KEY, sdp=sdp
+                )
+            elif (
+                path == WEBRTC_PATH_CAMERA_MEDIA
+                and state.role == ROLE_REMOTE_ROBOT_DRIVER
+                and isinstance(self.adapter, RemoteRobotAdapter)
+                and self.adapter.connection is state.websocket
+            ):
+                answer_sdp = await self.live_paths.accept_offer(
+                    path=path, control_key=CONTROL_RUNTIME_KEY, sdp=sdp
+                )
+            else:
+                return
         except Exception as exc:
-            LOGGER.exception("WebRTC %s negotiation failed for session %s", path, session.session_id)
-            await self._end_session(
-                session,
-                reason={"code": "session.ended.reconstruction_failed", "text": str(exc)},
-                ended_by="server",
-                clean=False,
-                request_driver_end=True,
+            LOGGER.exception("WebRTC negotiation failed for %s", path)
+            await self._stop_control(
+                {"code": "control.stopped.transport_failed", "text": str(exc)}
             )
             return
         await state.websocket.send(
@@ -530,193 +443,76 @@ class ItoServer:
                     TYPE_WEBRTC_ANSWER,
                     {"path": path, "sdp": answer_sdp},
                     reply_to_message_id=envelope["messageId"],
-                    robot_id=session.robot_id,
-                    session_id=session.session_id,
                 )
             )
         )
 
-    async def _relay_pilot_input_offer(
-        self,
-        state: ConnectionState,
-        session: SessionRecord,
-        envelope: dict[str, Any],
+    async def _stop_control(
+        self, reason: dict[str, str], *, notify: bool = True
     ) -> None:
-        if state is not session.pilot_connection or session.driver_connection is None:
-            LOGGER.warning("Ignoring pilot-input WebRTC offer without pilot and driver endpoints")
-            return
-        forwarded = make_envelope(
-            TYPE_WEBRTC_OFFER,
-            envelope["payload"],
-            robot_id=session.robot_id,
-            session_id=session.session_id,
-        )
-        self._pending_webrtc_routes[forwarded["messageId"]] = (state, envelope["messageId"])
-        await session.driver_connection.websocket.send(pack_envelope(forwarded))
-
-    async def _handle_webrtc_answer(self, state: ConnectionState, envelope: dict[str, Any]) -> None:
-        reply_to = envelope.get("replyToMessageId")
-        if not isinstance(reply_to, str):
-            LOGGER.warning("Ignoring WebRTC answer without replyToMessageId")
-            return
-        route = self._pending_webrtc_routes.pop(reply_to, None)
-        if route is None:
-            LOGGER.warning("Ignoring WebRTC answer for unknown offer %s", reply_to)
-            return
-        destination, original_message_id = route
-        session = self._session_for_live_path(destination, envelope)
-        if session is None:
-            return
-        await destination.websocket.send(
-            pack_envelope(
-                make_envelope(
-                    TYPE_WEBRTC_ANSWER,
-                    envelope["payload"],
-                    reply_to_message_id=original_message_id,
-                    robot_id=session.robot_id,
-                    session_id=session.session_id,
-                )
-            )
-        )
-
-    def _session_for_live_path(
-        self, state: ConnectionState, envelope: dict[str, Any]
-    ) -> SessionRecord | None:
-        session_id = envelope.get("sessionId") or state.session_id
-        if not isinstance(session_id, str):
-            return None
-        session = self.sessions.get(session_id)
-        if session is None or session.state != SESSION_STATE_ACTIVE:
-            return None
-        if state not in {session.pilot_connection, session.driver_connection}:
-            return None
-        return session
-
-    async def _end_session(
-        self,
-        session: SessionRecord,
-        *,
-        reason: dict[str, str],
-        ended_by: str,
-        clean: bool,
-        request_driver_end: bool = True,
-    ) -> None:
-        if session.state == SESSION_STATE_ENDED:
-            return
-        session.state = SESSION_STATE_ENDED
-        session.ended_reason = reason
-        session.ended_by = ended_by
-        session.clean = clean
-        record = self.drivers.get(session.robot_id)
-        if record:
-            record.occupied = False
-        if session.pilot_connection and session.pilot_connection.session_id == session.session_id:
-            session.pilot_connection.session_id = None
-        if session.driver_connection and session.driver_connection.session_id == session.session_id:
-            session.driver_connection.session_id = None
-        runtime = self.reconstruction_runtimes.pop(session.session_id, None)
+        was_active = self.control_active
+        self.control_active = False
+        if was_active:
+            await _maybe_await(self.adapter.stop_control())
+        runtime = self.reconstruction_runtime
+        self.reconstruction_runtime = None
         if runtime is not None:
             runtime.close()
-        close_session = getattr(self.live_paths, "close_session", None)
-        if close_session is not None:
-            await close_session(session.session_id)
-
-        if request_driver_end and session.driver_connection is not None:
-            await self._send_driver_session_end(session, reason, clean)
-
-        ended_payload = {"reason": reason, "endedBy": ended_by, "clean": clean}
-        await self._send_session_ended(session.pilot_connection, session, ended_payload)
-        await self._send_session_ended(session.driver_connection, session, ended_payload)
-
-    async def _send_driver_session_end(self, session: SessionRecord, reason: dict[str, str], clean: bool) -> None:
-        if session.driver_connection is None:
-            return
-        await session.driver_connection.websocket.send(
-            pack_envelope(
-                make_envelope(
-                    TYPE_SESSION_END,
-                    {"reason": reason, "clean": clean},
-                    robot_id=session.robot_id,
-                    session_id=session.session_id,
+        close_control = getattr(self.live_paths, "close_control", None)
+        if close_control is not None:
+            await close_control(CONTROL_RUNTIME_KEY)
+        if notify and self.pilot is not None:
+            await self.pilot.websocket.send(
+                pack_envelope(
+                    make_envelope(TYPE_CONTROL_STOPPED, {"reason": reason})
                 )
             )
+
+    async def _notify_robot_ready(self, ready: bool) -> None:
+        if self.pilot is None:
+            return
+        await self.pilot.websocket.send(
+            pack_envelope(make_envelope(TYPE_ROBOT_READY, {"ready": ready}))
         )
 
-    async def _send_session_ended(
-        self, state: ConnectionState | None, session: SessionRecord, payload: dict[str, Any]
+    async def _send_error(
+        self,
+        state: ConnectionState,
+        message_type: str,
+        reply_to: str | None,
+        code: str,
     ) -> None:
-        if state is None:
-            return
+        await self._send_result(
+            state,
+            message_type,
+            reply_to,
+            result_error(DisplayReason(code=code)),
+        )
+
+    async def _send_result(
+        self,
+        state: ConnectionState,
+        message_type: str,
+        reply_to: str | None,
+        payload: dict[str, Any],
+    ) -> None:
         await state.websocket.send(
             pack_envelope(
                 make_envelope(
-                    TYPE_SESSION_ENDED,
-                    payload,
-                    robot_id=session.robot_id,
-                    session_id=session.session_id,
+                    message_type, payload, reply_to_message_id=reply_to
                 )
             )
         )
 
-    async def _send_error(self, state: ConnectionState, message_type: str, reply_to: str | None, code: str) -> None:
-        await self._send_result(state, message_type, reply_to, result_error(DisplayReason(code=code)))
 
-    async def _send_result(self, state: ConnectionState, message_type: str, reply_to: str | None, payload: dict[str, Any]) -> None:
-        await state.websocket.send(pack_envelope(make_envelope(message_type, payload, reply_to_message_id=reply_to, robot_id=state.robot_id, session_id=state.session_id)))
-
-    def _make_session_id(self) -> str:
-        return f"session-{uuid4()}"
-
-    def _active_session_for_robot(self, robot_id: str) -> SessionRecord | None:
-        for session in self.sessions.values():
-            if session.robot_id == robot_id and session.state != SESSION_STATE_ENDED:
-                return session
-        return None
-
-    def _mark_connection_disappeared(self, state: ConnectionState) -> None:
-        for session in self.sessions.values():
-            changed = False
-            if session.pilot_connection is state:
-                session.pilot_connection = None
-                changed = True
-            if session.driver_connection is state:
-                session.driver_connection = None
-                changed = True
-            if changed and session.state != SESSION_STATE_ENDED:
-                session.note_endpoint_missing()
-
-    async def _watchdog_loop(self) -> None:
-        while True:
-            await asyncio.sleep(self.watchdog_seconds / 2)
-            now = monotonic()
-            for record in self.drivers.values():
-                if record.effective_status(now, self.watchdog_seconds) == ROBOT_STATUS_UNAVAILABLE and record.connection is not None and record.last_status_at is not None and now - record.last_status_at > self.watchdog_seconds:
-                    record.driver_status = ROBOT_STATUS_UNAVAILABLE
-                    record.availability_detail = {"code": "robot.unavailable.driver_status_timeout"}
-
-    async def _session_cleanup_loop(self) -> None:
-        while True:
-            await asyncio.sleep(self.session_cleanup_seconds / 2)
-            await self._cleanup_disappeared_endpoint_sessions()
-
-    async def _cleanup_disappeared_endpoint_sessions(self) -> None:
-        now = monotonic()
-        for session in list(self.sessions.values()):
-            if session.state == SESSION_STATE_ENDED or session.endpoint_missing_since is None:
-                continue
-            if now - session.endpoint_missing_since >= self.session_cleanup_seconds:
-                await self._end_session(
-                    session,
-                    reason={"code": "session.ended.endpoint_disappeared"},
-                    ended_by="server",
-                    clean=False,
-                    request_driver_end=True,
-                )
-                self.sessions.pop(session.session_id, None)
+async def _maybe_await(result: object) -> object:
+    if asyncio.iscoroutine(result):
+        return await result
+    return result
 
 
-async def run(config: ServerConfig | None = None) -> None:
-    await ItoServer(config).serve_forever()
+async def run(config: ItoConfig | None = None) -> None:
+    await ItoApplication(config).serve_forever()
 
 
 def main() -> None:

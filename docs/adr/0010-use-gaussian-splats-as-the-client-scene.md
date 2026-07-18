@@ -1,5 +1,0 @@
-# Use Gaussian splats as the client scene
-
-Every reconstruction algorithm normalizes its output into incremental Splat Batches, which are the only reconstructed-scene representation sent to the WebXR client. The client uses A-Frame and SparkJS to render a rolling Splat Scene; algorithm-specific depth, point maps, and internal state remain on the Ito Server. Direct View may later add a camera track, but it does not replace this canonical reconstruction contract.
-
-Splat Batches are binary data channel payloads, not JSON. The v1 default Splat Batch data channel is reliable and ordered because batches mutate the client-owned Splat Scene. The reliability/ordering profile is configurable through server container environment variables and sent to the Pilot Client as session configuration. The v1 binary layout should be selected based on the SparkJS insertion path: minimize client-side parsing, decoding, and conversion before adding the batch to the Splat Scene. The exact layout should not be frozen until the client spike proves which representation SparkJS can ingest with the least work on Pico 4.

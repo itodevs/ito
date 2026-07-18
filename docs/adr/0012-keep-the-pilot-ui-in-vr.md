@@ -1,5 +1,0 @@
-# Keep the pilot UI in VR
-
-Ito minimizes non-VR UI. The web page outside XR exists only to satisfy browser requirements for entering an immersive WebXR session, such as the required user gesture for an Enter VR button. Robot catalog browsing, robot acquisition, piloting-session state, and client settings are presented inside VR. This increases v1 VR UI work but keeps Ito's product surface aligned with immersive teleoperation instead of splitting the pilot workflow across flat browser pages and VR.
-
-V1 uses controller-ray interaction for VR UI. During an active session, a controller button opens the in-VR menu. While the menu is open, the client withholds robot-directed pilot input but keeps UI interaction active. If Menu Pause lasts long enough to exceed the driver's pilot-input timeout, the driver enters its normal control-loss response. When the menu closes, the client resumes sending pilot input automatically; the driver owns safe control resumption and must not instantly snap the robot to a substantially different pilot pose.

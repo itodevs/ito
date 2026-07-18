@@ -1,10 +1,11 @@
-import { ClientSettingsStore, mergeSessionConfig } from "./config.js";
+import { ClientSettingsStore, mergeControlConfig } from "./config.js";
 import { ItoControlClient, DisplayableError } from "./control-client.js";
 import { TextResources } from "./i18n.js";
 import { DataChannelPilotInputTransport, PilotInputLoop } from "./pilot-input.js";
-import { displayReason, ROBOT_STATUS_AVAILABLE } from "./protocol.js";
+import { displayReason } from "./protocol.js";
 import { SparkJsSplatAdapter, SplatSceneOwner } from "./splat-scene.js";
 import { VisualFreshnessMonitor } from "./visual-freshness.js";
+import { PilotInputPeer, SplatBatchPeer } from "./webrtc.js";
 import { VrUi } from "./vr-ui.js";
 
 export class ItoPilotApp {
@@ -19,18 +20,19 @@ export class ItoPilotApp {
     this.text = new TextResources();
     this.ui = null;
     this.control = null;
-    this.catalogRobots = [];
-    this.selectedRobot = null;
-    this.session = null;
+    this.endpoint = null;
+    this.controlActive = false;
+    this.controlConfig = null;
     this.menuOpen = false;
     this.visualPaused = false;
     this.splatScene = null;
     this.freshness = null;
+    this.pilotPeer = null;
+    this.splatPeer = null;
     this.pilotInput = new PilotInputLoop({
       transport: new DataChannelPilotInputTransport(),
       rateHz: this.settings.pilotInputRateHz,
     });
-    this.xrReferenceSpace = null;
     this.controllerMenuHandlersInstalled = false;
   }
 
@@ -41,7 +43,7 @@ export class ItoPilotApp {
     this.statusElement.textContent = "";
     this.launchButton.addEventListener("click", () => this.enterVr());
     this.scene.addEventListener("click", (event) => this.handleClick(event));
-    this.scene.addEventListener("enter-vr", () => this.connectAndShowCatalog());
+    this.scene.addEventListener("enter-vr", () => this.connectAndShowReady());
     if (this.scene.hasLoaded) this.installControllerMenuHandlers();
     else this.scene.addEventListener("loaded", () => this.installControllerMenuHandlers(), { once: true });
     this.scene.addEventListener("xrframe", (event) => this.onXrFrame(event.detail));
@@ -59,149 +61,119 @@ export class ItoPilotApp {
     this.scene.enterVR();
   }
 
-  async connectAndShowCatalog() {
+  async connectAndShowReady() {
     try {
       this.renderStatus(this.text.t("connection.connecting"));
+      this.control?.close();
       this.control = new ItoControlClient({
         serverUrl: this.settings.serverUrl,
         requestTimeoutMs: this.settings.requestTimeoutMs,
       });
-      this.control.addEventListener("sessionended", (event) => this.handleSessionEnded(event.detail));
-      await this.control.connect();
-      await this.showCatalog();
+      this.control.addEventListener("controlstopped", (event) => this.handleControlStopped(event.detail));
+      this.control.addEventListener("robotready", (event) => this.handleRobotReady(event.detail));
+      this.endpoint = await this.control.connect();
+      this.showReady();
     } catch (error) {
       this.renderStatus(this.reasonText(error));
     }
   }
 
-  async showCatalog(reason = null) {
-    this.session = null;
-    this.selectedRobot = null;
-    this.menuOpen = false;
-    this.visualPaused = false;
-    this.pilotInput.stop();
-    this.splatScene?.clear();
-    this.splatScene = null;
-
+  showReady(reason = null) {
+    this.resetControl();
     const panel = this.ui.panel({
-      title: this.text.t("catalog.title"),
+      title: this.text.t("control.ready"),
       subtitle: reason ? this.text.displayReason(reason) : "",
     });
+    const backendKey = this.endpoint?.backend === "remote" ? "connection.remoteBackend" : "connection.localBackend";
+    this.ui.label(panel, this.text.t(backendKey), "-1.42 0.36 0.02");
     this.ui.button(panel, {
-      label: this.text.t("catalog.refresh"),
-      position: "1.05 0.82 0.02",
-      action: "catalog.refresh",
-      width: 0.72,
+      label: this.endpoint?.robotReady ? this.text.t("control.start") : this.text.t("control.notReady"),
+      position: "-0.45 -0.22 0.02",
+      enabled: Boolean(this.endpoint?.robotReady),
+      action: "control.start",
+      width: 1.15,
     });
     this.ui.button(panel, {
-      label: this.text.t("session.settings"),
-      position: "0.2 0.82 0.02",
+      label: this.text.t("control.settings"),
+      position: "0.72 -0.22 0.02",
       action: "settings.open",
-      width: 0.72,
+      width: 0.82,
     });
+  }
 
+  handleRobotReady(envelope) {
+    if (!this.endpoint || typeof envelope.payload?.ready !== "boolean") return;
+    this.endpoint.robotReady = envelope.payload.ready;
+    if (!this.controlActive) this.showReady();
+  }
+
+  async startControl() {
+    this.ui.panel({ title: this.text.t("control.starting") });
     try {
-      this.catalogRobots = await this.control.getCatalog();
-      this.renderCatalogRows(panel);
-    } catch (error) {
-      this.ui.label(panel, this.reasonText(error), "-1.42 0.38 0.02", { color: "#ffd2c9" });
-    }
-  }
-
-  renderCatalogRows(panel) {
-    if (this.catalogRobots.length === 0) {
-      this.ui.label(panel, this.text.t("catalog.empty"), "-1.42 0.32 0.02");
-      return;
-    }
-    this.catalogRobots.slice(0, 6).forEach((robot, index) => {
-      const y = 0.46 - index * 0.28;
-      const type = this.text.enumLabel("robotType", robot.type);
-      const status = this.text.enumLabel("robotStatus", robot.status);
-      const detail = robot.availabilityDetail ? ` - ${this.text.displayReason(robot.availabilityDetail)}` : "";
-      this.ui.label(panel, `${robot.name}  ${type}  ${status}${detail}`, "-1.42 " + y + " 0.02", {
-        width: 2.2,
-        color: robot.status === ROBOT_STATUS_AVAILABLE ? "#f7fbff" : "#98a7b7",
+      const result = await this.control.startControl();
+      this.controlConfig = mergeControlConfig(this.settings, result.controlConfig || this.endpoint.controlConfig || {});
+      this.splatScene = new SplatSceneOwner({
+        adapter: new SparkJsSplatAdapter(this.splatRoot),
+        budget: this.controlConfig.splatBudget,
+        lifetimeMs: this.controlConfig.splatLifetimeMs,
       });
-      this.ui.button(panel, {
-        label: robot.status === ROBOT_STATUS_AVAILABLE ? this.text.t("catalog.acquire") : this.text.t("catalog.unavailable"),
-        position: `1.02 ${y + 0.02} 0.02`,
-        enabled: robot.status === ROBOT_STATUS_AVAILABLE,
-        action: "catalog.acquire",
-        detail: robot,
-        width: 0.72,
+      this.freshness = new VisualFreshnessMonitor({ timeoutMs: this.controlConfig.visualFreshnessTimeoutMs });
+      this.freshness.addEventListener("stale", () => this.setVisualPaused(true));
+      this.freshness.addEventListener("fresh", () => this.setVisualPaused(false));
+      this.pilotPeer = new PilotInputPeer({
+        controlClient: this.control,
+        dataChannelProfile: this.controlConfig.pilotInputDataChannel,
       });
-    });
-  }
-
-  async acquireRobot(robot) {
-    this.selectedRobot = robot;
-    const panel = this.ui.panel({
-      title: this.text.t("connection.connecting"),
-      subtitle: this.text.t("session.connecting", { name: robot.name }),
-    });
-    this.ui.label(panel, this.text.t("connection.connecting"), "-1.42 0.35 0.02");
-    try {
-      const acquisition = await this.control.acquire(robot.robotId);
-      this.startSession(robot, acquisition);
+      this.splatPeer = new SplatBatchPeer({
+        controlClient: this.control,
+        dataChannelProfile: this.controlConfig.splatBatchDataChannel,
+      });
+      this.splatPeer.addEventListener("splatbatch", (event) => this.receiveSplatBatch(event.detail));
+      const [pilotChannel] = await Promise.all([this.pilotPeer.negotiate(), this.splatPeer.negotiate()]);
+      this.pilotInput.transport.attach(pilotChannel);
+      this.pilotInput.rateHz = this.controlConfig.pilotInputRateHz;
+      this.controlActive = true;
+      this.freshness.markFresh();
+      this.pilotInput.start();
+      this.renderControl();
     } catch (error) {
-      await this.showCatalog(error.reason);
+      try {
+        await this.control.stopControl(displayReason("control.stopped.start_failed"));
+      } catch {}
+      this.showReady(error.reason || displayReason("control.stopped.start_failed", error.message));
     }
-  }
-
-  startSession(robot, acquisition) {
-    const sessionConfig = mergeSessionConfig(this.settings, acquisition.sessionConfig || {});
-    this.session = {
-      sessionId: acquisition.sessionId,
-      robotId: acquisition.robotId,
-      robot,
-      sessionConfig,
-      ended: false,
-    };
-    this.splatScene = new SplatSceneOwner({
-      adapter: new SparkJsSplatAdapter(this.splatRoot),
-      budget: sessionConfig.splatBudget,
-      lifetimeMs: sessionConfig.splatLifetimeMs,
-    });
-    this.freshness = new VisualFreshnessMonitor({ timeoutMs: sessionConfig.visualFreshnessTimeoutMs });
-    this.freshness.addEventListener("stale", () => this.setVisualPaused(true));
-    this.freshness.addEventListener("fresh", () => this.setVisualPaused(false));
-    this.freshness.markFresh();
-    this.pilotInput.rateHz = sessionConfig.pilotInputRateHz;
-    this.pilotInput.start();
-    this.renderSession();
   }
 
   receiveSplatBatch(payload, metadata = {}) {
-    if (!this.session || this.session.ended || !this.splatScene) return null;
-    if (this.visualPaused) this.freshness?.markFresh();
+    if (!this.controlActive || !this.splatScene) return null;
     const batch = this.splatScene.applySplatBatch(payload, metadata);
     if (batch) this.freshness?.markFresh();
     return batch;
   }
 
-  renderSession() {
+  renderControl() {
     const panel = this.ui.panel({
-      title: this.text.t("session.active", { name: this.session.robot.name }),
-      subtitle: this.visualPaused ? this.text.t("session.visualPaused") : this.text.t("connection.connected"),
+      title: this.text.t("control.active"),
+      subtitle: this.visualPaused ? this.text.t("control.visualPaused") : this.text.t("connection.connected"),
       width: 2.4,
       height: this.menuOpen ? 1.52 : 0.72,
       position: "0 1.85 -2.8",
     });
     this.ui.button(panel, {
-      label: this.menuOpen ? this.text.t("session.resume") : this.text.t("session.menu"),
+      label: this.menuOpen ? this.text.t("control.resume") : this.text.t("control.menu"),
       position: "-0.48 0.0 0.02",
-      action: "session.menu.toggle",
+      action: "control.menu.toggle",
       width: 0.82,
     });
     if (this.menuOpen) {
       this.ui.button(panel, {
-        label: this.text.t("session.end"),
+        label: this.text.t("control.stop"),
         position: "0.48 0.0 0.02",
-        action: "session.end",
+        action: "control.stop",
         width: 0.82,
       });
       this.ui.button(panel, {
-        label: this.text.t("session.settings"),
+        label: this.text.t("control.settings"),
         position: "0 -0.34 0.02",
         action: "settings.open",
         width: 0.92,
@@ -213,86 +185,72 @@ export class ItoPilotApp {
     this.visualPaused = paused;
     this.splatScene?.setFrozen(paused);
     if (paused) this.pilotInput.stop();
-    if (!paused && !this.menuOpen && !this.session?.ended) this.pilotInput.start();
-    if (this.session && !this.session.ended) this.renderSession();
+    if (!paused && !this.menuOpen && this.controlActive) this.pilotInput.start();
+    if (this.controlActive) this.renderControl();
   }
 
   toggleMenu() {
-    if (!this.session?.sessionId || this.session.ended) return;
+    if (!this.controlActive) return;
     this.menuOpen = !this.menuOpen;
     if (this.menuOpen) this.pilotInput.stop();
     if (!this.menuOpen && !this.visualPaused) this.pilotInput.start();
-    this.renderSession();
+    this.renderControl();
   }
 
-  async endSession() {
-    if (!this.session?.sessionId) return;
+  async stopControl() {
+    if (!this.controlActive) return;
     this.pilotInput.stop();
-    this.ui.panel({ title: this.text.t("session.ending"), subtitle: this.session.robot.name });
+    this.ui.panel({ title: this.text.t("control.stopping") });
     try {
-      await this.control.endSession(this.session.sessionId);
+      await this.control.stopControl();
     } catch (error) {
-      this.handleSessionEnded({
-        payload: { reason: error.reason || displayReason("session.ended.requested"), endedBy: "pilotClient", clean: false },
-        sessionId: this.session.sessionId,
-      });
+      this.handleControlStopped({ payload: { reason: error.reason || displayReason("control.stopped.pilot_requested") } });
     }
   }
 
-  handleSessionEnded(envelope) {
-    if (!this.session) return;
-    this.session.ended = true;
-    this.pilotInput.stop();
-    this.splatScene?.setFrozen(true);
-    const reason = envelope.payload?.reason || displayReason("session.ended.requested");
+  handleControlStopped(envelope) {
+    const reason = envelope.payload?.reason || displayReason("control.stopped.requested");
+    this.resetControl();
     const panel = this.ui.panel({
-      title: this.text.t("session.ended"),
+      title: this.text.t("control.stopped"),
       subtitle: this.text.displayReason(reason),
       width: 2.8,
       height: 1.35,
       position: "0 1.65 -2.3",
     });
     this.ui.button(panel, {
-      label: this.text.t("session.returnToCatalog"),
+      label: this.text.t("control.returnToReady"),
       position: "0 -0.28 0.02",
-      action: "session.returnCatalog",
+      action: "control.ready",
       width: 1.35,
     });
   }
 
+  resetControl() {
+    this.controlActive = false;
+    this.menuOpen = false;
+    this.visualPaused = false;
+    this.pilotInput?.stop();
+    this.pilotPeer?.close();
+    this.splatPeer?.close();
+    this.pilotPeer = null;
+    this.splatPeer = null;
+    this.splatScene?.clear();
+    this.splatScene = null;
+    this.freshness = null;
+  }
+
   showSettings() {
-    const panel = this.ui.panel({
-      title: this.text.t("settings.title"),
-      subtitle: this.settings.serverUrl,
-      width: 3.2,
-      height: 2.25,
-    });
-    const rows = [
-      ["visualFreshnessTimeoutMs", 250],
-      ["pilotInputRateHz", 5],
-      ["splatBudget", 20],
-      ["splatLifetimeMs", 5000],
-    ];
+    const panel = this.ui.panel({ title: this.text.t("settings.title"), subtitle: this.settings.serverUrl, width: 3.2, height: 2.25 });
+    const rows = [["visualFreshnessTimeoutMs", 250], ["pilotInputRateHz", 5], ["splatBudget", 20], ["splatLifetimeMs", 5000]];
     rows.forEach(([key, step], index) => {
       const y = 0.48 - index * 0.3;
-      this.ui.label(panel, `${this.text.t(`settings.${key}`)}: ${this.settings[key]}`, "-1.42 " + y + " 0.02", {
-        width: 1.7,
-      });
+      this.ui.label(panel, `${this.text.t(`settings.${key}`)}: ${this.settings[key]}`, `-1.42 ${y} 0.02`, { width: 1.7 });
       this.ui.button(panel, { label: "-", position: `0.52 ${y + 0.02} 0.02`, action: "settings.adjust", detail: { key, delta: -step }, width: 0.22 });
       this.ui.button(panel, { label: "+", position: `0.84 ${y + 0.02} 0.02`, action: "settings.adjust", detail: { key, delta: step }, width: 0.22 });
     });
-    this.ui.button(panel, {
-      label: this.text.t("settings.save"),
-      position: "-0.42 -0.82 0.02",
-      action: "settings.save",
-      width: 0.72,
-    });
-    this.ui.button(panel, {
-      label: this.session ? this.text.t("session.resume") : this.text.t("session.returnToCatalog"),
-      position: "0.48 -0.82 0.02",
-      action: "settings.close",
-      width: 1.05,
-    });
+    this.ui.button(panel, { label: this.text.t("settings.save"), position: "-0.42 -0.82 0.02", action: "settings.save", width: 0.72 });
+    this.ui.button(panel, { label: this.text.t("control.resume"), position: "0.48 -0.82 0.02", action: "settings.close", width: 1.05 });
   }
 
   handleClick(event) {
@@ -300,11 +258,11 @@ export class ItoPilotApp {
     const action = target?.getAttribute("data-action");
     if (!action) return;
     const detail = target.itoActionDetail;
-    if (action === "catalog.refresh") this.showCatalog();
-    if (action === "catalog.acquire") this.acquireRobot(detail);
-    if (action === "session.menu.toggle") this.toggleMenu();
-    if (action === "session.end") this.endSession();
-    if (action === "session.returnCatalog") this.showCatalog();
+    if (action === "connection.retry") this.connectAndShowReady();
+    if (action === "control.start") this.startControl();
+    if (action === "control.menu.toggle") this.toggleMenu();
+    if (action === "control.stop") this.stopControl();
+    if (action === "control.ready") this.showReady();
     if (action === "settings.open") this.showSettings();
     if (action === "settings.adjust") {
       this.settings[detail.key] += detail.delta;
@@ -313,24 +271,23 @@ export class ItoPilotApp {
     }
     if (action === "settings.save") {
       this.settings = this.settingsStore.save(this.settings);
-      if (this.session?.sessionConfig && this.splatScene) {
-        this.session.sessionConfig = mergeSessionConfig(this.settings, this.session.sessionConfig);
-        this.splatScene.setLimits(this.session.sessionConfig);
+      if (this.controlConfig && this.splatScene) {
+        this.controlConfig = mergeControlConfig(this.settings, this.controlConfig);
+        this.splatScene.setLimits(this.controlConfig);
       }
       this.showSettings();
     }
     if (action === "settings.close") {
-      if (this.session && !this.session.ended) this.renderSession();
-      else this.showCatalog();
+      if (this.controlActive) this.renderControl();
+      else this.showReady();
     }
   }
 
   onXrFrame({ frame, referenceSpace }) {
-    if (!frame || !referenceSpace || !this.session || this.session.ended) return;
-    this.xrReferenceSpace = referenceSpace;
+    if (!frame || !referenceSpace || !this.controlActive) return;
     this.freshness?.tick();
     this.splatScene?.evict();
-    this.pilotInput.maybeSend(frame, referenceSpace, this.session.sessionId);
+    this.pilotInput.maybeSend(frame, referenceSpace);
   }
 
   installControllerMenuHandlers() {
@@ -358,12 +315,7 @@ export class ItoPilotApp {
 
   renderStatus(message) {
     const panel = this.ui.panel({ title: message || this.text.t("app.title"), height: 1.0 });
-    this.ui.button(panel, {
-      label: this.text.t("catalog.refresh"),
-      position: "0 -0.2 0.02",
-      action: "catalog.refresh",
-      width: 0.85,
-    });
+    this.ui.button(panel, { label: this.text.t("connection.retry"), position: "0 -0.2 0.02", action: "connection.retry", width: 0.85 });
   }
 
   reasonText(error) {

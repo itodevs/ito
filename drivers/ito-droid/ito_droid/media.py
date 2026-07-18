@@ -18,16 +18,12 @@ class CameraMediaPublisher:
     """
 
     def __init__(self) -> None:
-        self.started_session_id: str | None = None
+        self.active = False
         self.frame_count = 0
         self.last_frame: CameraFrame | None = None
 
-    @property
-    def active(self) -> bool:
-        return self.started_session_id is not None
-
-    def start(self, session_id: str) -> None:
-        self.started_session_id = session_id
+    def start(self) -> None:
+        self.active = True
         self.frame_count = 0
         self.last_frame = None
 
@@ -39,5 +35,4 @@ class CameraMediaPublisher:
         LOGGER.debug("camera_media_frame bytes=%s encoding=%s", len(frame.data), frame.encoding)
 
     def stop(self) -> None:
-        self.started_session_id = None
-
+        self.active = False
