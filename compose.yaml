@@ -27,7 +27,7 @@ services:
       ITO_MOCK_ROBOT_CAMERA_VIDEO: /data/mock-camera.mp4
       ITO_MOCK_ROBOT_CAMERA_LOOP: "true"
     volumes:
-      - ${ITO_MOCK_ROBOT_CAMERA_VIDEO_HOST:-./fixtures/mock-camera.mp4}:/data/mock-camera.mp4:ro
+      - ${ITO_MOCK_ROBOT_CAMERA_VIDEO_HOST:-./fixtures/mock-camera.mp4}:/data/mock-camera.mp4:ro,Z
 
   ito-droid:
     profiles:
@@ -40,3 +40,8 @@ services:
       ITO_URL: ${ITO_URL:-ws://127.0.0.1:8765/ws}
       ITO_DROID_ROS_CAMERA_TOPIC: ${ITO_DROID_ROS_CAMERA_TOPIC:-/image_raw}
       ITO_DROID_ROS_SERVO_COMMAND_TOPIC: ${ITO_DROID_ROS_SERVO_COMMAND_TOPIC:-/ito_droid/camera_pan/command}
+
+networks:
+  default:
+    name: podman
+    external: true
