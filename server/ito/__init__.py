@@ -1,1 +1,1 @@
-"""Ito Server Python package."""
+"""Ito application Python package."""

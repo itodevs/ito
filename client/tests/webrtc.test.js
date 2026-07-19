@@ -38,7 +38,6 @@ test("SplatBatchPeer negotiates non-trickle offer over control client", async ()
   };
   const peer = new SplatBatchPeer({
     controlClient,
-    sessionId: "session-1",
     RTCPeerConnectionImpl: FakePeerConnection,
   });
 
@@ -48,5 +47,6 @@ test("SplatBatchPeer negotiates non-trickle offer over control client", async ()
   assert.equal(requests[0].payload.path, "splatBatches");
   assert.equal(requests[0].payload.sdp, "local offer");
   assert.equal(requests[0].expectedType, "webrtc.answer");
+  assert.deepEqual(requests[0].options, undefined);
   assert.deepEqual(peer.peerConnection.remoteDescription, { type: "answer", sdp: "server answer" });
 });

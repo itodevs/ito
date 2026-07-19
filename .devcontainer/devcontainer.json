@@ -12,13 +12,10 @@
   "mounts": [
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
   ],
-  "forwardPorts": [8080, 8765],
+  "forwardPorts": [8765],
   "portsAttributes": {
-    "8080": {
-      "label": "Pilot client"
-    },
     "8765": {
-      "label": "Ito server"
+      "label": "Ito application and Pilot client"
     }
   }
 }

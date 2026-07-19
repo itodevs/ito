@@ -35,9 +35,9 @@ class CameraPanController:
         return self.command_degrees
 
     def receive_snapshot(self, snapshot: Mapping[str, Any], now_seconds: float) -> PilotInputSnapshot:
-        yaw = snapshot.get("headsetYawRadians")
+        yaw = snapshot.get("headsetYawRad")
         if not isinstance(yaw, (int, float)):
-            raise ValueError("Pilot Input Snapshot requires numeric headsetYawRadians")
+            raise ValueError("Pilot Input Snapshot requires numeric headsetYawRad")
         parsed = PilotInputSnapshot(float(yaw), now_seconds)
         was_lost = self._control_lost
         self._latest_snapshot = parsed
@@ -62,6 +62,7 @@ class CameraPanController:
         if age_ms > self.config.pilot_input_timeout_ms:
             self._control_lost = True
             self._resumed_at_seconds = None
+            self.command_degrees = self.config.servo_neutral_degrees
             return self.command_degrees
 
         target = self.target_for_yaw(snapshot.headset_yaw_radians)
@@ -91,4 +92,3 @@ class CameraPanController:
 
 def _clamp(value: float, lower: float, upper: float) -> float:
     return min(upper, max(lower, value))
-

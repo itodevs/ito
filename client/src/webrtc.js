@@ -31,10 +31,8 @@ export async function applyNonTrickleAnswer(peerConnection, sdp) {
 }
 
 export class PilotInputPeer {
-  constructor({ controlClient, sessionId, robotId, dataChannelProfile = {}, RTCPeerConnectionImpl = globalThis.RTCPeerConnection }) {
+  constructor({ controlClient, dataChannelProfile = {}, RTCPeerConnectionImpl = globalThis.RTCPeerConnection }) {
     this.controlClient = controlClient;
-    this.sessionId = sessionId;
-    this.robotId = robotId;
     this.peerConnection = new RTCPeerConnectionImpl({ iceServers: [] });
     this.dataChannel = this.peerConnection.createDataChannel("ito.pilotInput", dataChannelProfile);
   }
@@ -45,7 +43,6 @@ export class PilotInputPeer {
       MESSAGE_TYPES.WEBRTC_OFFER,
       { path: LIVE_PATHS.PILOT_INPUT, sdp },
       MESSAGE_TYPES.WEBRTC_ANSWER,
-      { robotId: this.robotId, sessionId: this.sessionId },
     );
     await applyNonTrickleAnswer(this.peerConnection, result.sdp);
     return this.dataChannel;
@@ -58,10 +55,9 @@ export class PilotInputPeer {
 }
 
 export class SplatBatchPeer extends EventTarget {
-  constructor({ controlClient, sessionId, dataChannelProfile = {}, RTCPeerConnectionImpl = globalThis.RTCPeerConnection }) {
+  constructor({ controlClient, dataChannelProfile = {}, RTCPeerConnectionImpl = globalThis.RTCPeerConnection }) {
     super();
     this.controlClient = controlClient;
-    this.sessionId = sessionId;
     this.peerConnection = new RTCPeerConnectionImpl({ iceServers: [] });
     this.dataChannelProfile = dataChannelProfile;
   }
@@ -73,7 +69,6 @@ export class SplatBatchPeer extends EventTarget {
       MESSAGE_TYPES.WEBRTC_OFFER,
       { path: LIVE_PATHS.SPLAT_BATCHES, sdp },
       MESSAGE_TYPES.WEBRTC_ANSWER,
-      { sessionId: this.sessionId },
     );
     await applyNonTrickleAnswer(this.peerConnection, result.sdp);
   }

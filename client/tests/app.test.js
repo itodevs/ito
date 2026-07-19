@@ -3,6 +3,39 @@ import test from "node:test";
 
 import { ItoPilotApp } from "../src/app.js";
 
+test("ready screen offers direct control without a robot catalog", () => {
+  const buttons = [];
+  const app = {
+    endpoint: { robotReady: true },
+    ui: {
+      panel(options) {
+        assert.equal(options.title, "Ready");
+        return {};
+      },
+      button(_panel, options) {
+        buttons.push(options);
+      },
+    },
+    text: {
+      t(key) {
+        return {
+          "control.ready": "Ready",
+          "control.start": "Start control",
+          "control.settings": "Settings",
+        }[key] || key;
+      },
+      displayReason() {
+        return "";
+      },
+    },
+    resetControl() {},
+  };
+
+  ItoPilotApp.prototype.showReady.call(app);
+
+  assert.deepEqual(buttons.map((button) => button.action), ["control.start", "settings.open"]);
+});
+
 test("enterVr enters immediately when A-Frame has already loaded", async () => {
   let entered = 0;
   let listenerAdded = false;

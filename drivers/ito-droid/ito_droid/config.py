@@ -34,10 +34,7 @@ def _env_float(name: str, default: float, *, minimum: float | None = None) -> fl
 
 @dataclass(frozen=True)
 class ItoDroidConfig:
-    server_url: str = "ws://localhost:8765"
-    robot_id: str = "ito-droid-1"
-    name: str = "Ito Droid"
-    status_interval_ms: int = 1000
+    ito_url: str = "ws://localhost:8765/ws"
     reconnect_initial_delay_ms: int = 250
     reconnect_max_delay_ms: int = 5000
     ros_camera_topic: str = "/image_raw"
@@ -57,14 +54,7 @@ class ItoDroidConfig:
     @classmethod
     def from_env(cls) -> "ItoDroidConfig":
         return cls(
-            server_url=os.getenv("ITO_SERVER_URL", cls.server_url),
-            robot_id=os.getenv("ITO_DROID_ROBOT_ID", cls.robot_id),
-            name=os.getenv("ITO_DROID_NAME", cls.name),
-            status_interval_ms=_env_int(
-                "ITO_DROID_STATUS_INTERVAL_MS",
-                cls.status_interval_ms,
-                minimum=1,
-            ),
+            ito_url=os.getenv("ITO_URL", cls.ito_url),
             reconnect_initial_delay_ms=_env_int(
                 "ITO_DROID_RECONNECT_INITIAL_DELAY_MS",
                 cls.reconnect_initial_delay_ms,
@@ -132,4 +122,3 @@ class ItoDroidConfig:
         ):
             raise ValueError("ITO_DROID_RESUMPTION_INITIAL_VELOCITY_DEGREES_PER_SECOND must be <= max velocity")
         return self
-

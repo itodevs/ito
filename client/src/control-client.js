@@ -9,11 +9,10 @@ import {
 } from "./protocol.js";
 
 export class ItoControlClient extends EventTarget {
-  constructor({ serverUrl, requestTimeoutMs = 5000, sessionId = null, WebSocketImpl = globalThis.WebSocket }) {
+  constructor({ serverUrl, requestTimeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
     super();
     this.serverUrl = serverUrl;
     this.requestTimeoutMs = requestTimeoutMs;
-    this.sessionId = sessionId;
     this.WebSocketImpl = WebSocketImpl;
     this.websocket = null;
     this.pending = new Map();
@@ -32,9 +31,11 @@ export class ItoControlClient extends EventTarget {
       this.websocket.addEventListener("error", reject, { once: true });
     });
 
-    const payload = { role: ROLE_PILOT_CLIENT };
-    if (this.sessionId) payload.sessionId = this.sessionId;
-    const hello = await this.request(MESSAGE_TYPES.CONNECTION_HELLO, payload, MESSAGE_TYPES.CONNECTION_HELLO_RESULT);
+    const hello = await this.request(
+      MESSAGE_TYPES.CONNECTION_HELLO,
+      { role: ROLE_PILOT_CLIENT },
+      MESSAGE_TYPES.CONNECTION_HELLO_RESULT,
+    );
     if (!hello.ok) throw new DisplayableError(resultReason(hello));
     return hello.value;
   }
@@ -49,44 +50,28 @@ export class ItoControlClient extends EventTarget {
     this.pending.clear();
   }
 
-  async getCatalog() {
+  async startControl() {
     const result = await this.request(
-      MESSAGE_TYPES.CATALOG_GET,
-      { includeUnavailable: true },
-      MESSAGE_TYPES.CATALOG_GET_RESULT,
-    );
-    if (!result.ok) throw new DisplayableError(resultReason(result));
-    return result.value.robots || [];
-  }
-
-  async acquire(robotId) {
-    const result = await this.request(
-      MESSAGE_TYPES.SESSION_ACQUIRE,
-      { robotId },
-      MESSAGE_TYPES.SESSION_ACQUIRE_RESULT,
-      { robotId },
-    );
-    if (!result.ok) throw new DisplayableError(resultReason(result));
-    this.sessionId = result.value.sessionId;
-    return result.value;
-  }
-
-  async endSession(sessionId, reason = displayReason("session.ended.pilot_requested"), clean = true) {
-    const result = await this.request(
-      MESSAGE_TYPES.SESSION_END,
-      { reason, clean },
-      MESSAGE_TYPES.SESSION_END_RESULT,
-      { sessionId },
+      MESSAGE_TYPES.CONTROL_START,
+      {},
+      MESSAGE_TYPES.CONTROL_START_RESULT,
     );
     if (!result.ok) throw new DisplayableError(resultReason(result));
     return result.value;
   }
 
-  request(type, payload, expectedType, options = {}) {
-    const envelope = makeEnvelope(type, payload, {
-      robotId: options.robotId,
-      sessionId: options.sessionId,
-    });
+  async stopControl(reason = displayReason("control.stopped.pilot_requested")) {
+    const result = await this.request(
+      MESSAGE_TYPES.CONTROL_STOP,
+      { reason },
+      MESSAGE_TYPES.CONTROL_STOP_RESULT,
+    );
+    if (!result.ok) throw new DisplayableError(resultReason(result));
+    return result.value;
+  }
+
+  request(type, payload, expectedType) {
+    const envelope = makeEnvelope(type, payload);
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         this.pending.delete(envelope.messageId);
@@ -125,9 +110,13 @@ export class ItoControlClient extends EventTarget {
       return;
     }
 
-    if (envelope.type === MESSAGE_TYPES.SESSION_ENDED) {
-      this.sessionId = null;
-      this.dispatchEvent(new CustomEvent("sessionended", { detail: envelope }));
+    if (envelope.type === MESSAGE_TYPES.CONTROL_STOPPED) {
+      this.dispatchEvent(new CustomEvent("controlstopped", { detail: envelope }));
+      return;
+    }
+
+    if (envelope.type === MESSAGE_TYPES.ROBOT_READY) {
+      this.dispatchEvent(new CustomEvent("robotready", { detail: envelope }));
       return;
     }
 

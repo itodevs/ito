@@ -23,11 +23,12 @@ class PilotInputWebRtcReceiver:
         self._peer_connection_type = RTCPeerConnection
         self._session_description_type = RTCSessionDescription
         self._receive_snapshot = receive_snapshot
-        self._peer_connections: dict[str, Any] = {}
+        self._peer_connection: Any | None = None
 
-    async def accept_offer(self, *, session_id: str, sdp: str) -> str:
+    async def accept_offer(self, *, sdp: str) -> str:
+        await self.close()
         pc = self._peer_connection_type(configuration=self._configuration_type(iceServers=[]))
-        self._peer_connections[session_id] = pc
+        self._peer_connection = pc
 
         @pc.on("datachannel")
         def on_data_channel(channel: Any) -> None:
@@ -45,17 +46,11 @@ class PilotInputWebRtcReceiver:
         await _wait_for_ice_gathering_complete(pc)
         return pc.localDescription.sdp
 
-    async def close_session(self, session_id: str | None) -> None:
-        if session_id is None:
-            return
-        pc = self._peer_connections.pop(session_id, None)
+    async def close(self) -> None:
+        pc = self._peer_connection
+        self._peer_connection = None
         if pc is not None:
             await pc.close()
-
-    async def close_all(self) -> None:
-        peer_connections = list(self._peer_connections.values())
-        self._peer_connections.clear()
-        await asyncio.gather(*(pc.close() for pc in peer_connections), return_exceptions=True)
 
 
 class CameraMediaWebRtcPublisher:
@@ -71,10 +66,11 @@ class CameraMediaWebRtcPublisher:
         self._peer_connection_type = RTCPeerConnection
         self._session_description_type = RTCSessionDescription
         self._media_player_type = MediaPlayer
-        self._peer_connections: dict[str, Any] = {}
-        self._players: dict[str, Any] = {}
+        self._peer_connection: Any | None = None
+        self._player: Any | None = None
 
-    async def create_offer(self, *, session_id: str, video_path: str | Path, loop: bool) -> str:
+    async def create_offer(self, *, video_path: str | Path, loop: bool) -> str:
+        await self.close()
         pc = self._peer_connection_type(configuration=self._configuration_type(iceServers=[]))
         player = self._media_player_type(str(video_path), loop=loop)
         if player.video is None:
@@ -82,38 +78,28 @@ class CameraMediaWebRtcPublisher:
             raise RuntimeError(f"mock camera video has no video stream: {video_path}")
         pc.addTrack(player.video)
         self._prefer_h264(pc)
-        self._peer_connections[session_id] = pc
-        self._players[session_id] = player
+        self._peer_connection = pc
+        self._player = player
         offer = await pc.createOffer()
         await pc.setLocalDescription(offer)
         await _wait_for_ice_gathering_complete(pc)
         return pc.localDescription.sdp
 
-    async def accept_answer(self, *, session_id: str, sdp: str) -> None:
-        pc = self._peer_connections.get(session_id)
+    async def accept_answer(self, *, sdp: str) -> None:
+        pc = self._peer_connection
         if pc is None:
-            raise RuntimeError(f"no cameraMedia peer connection for session {session_id}")
+            raise RuntimeError("no cameraMedia peer connection for active control")
         await pc.setRemoteDescription(self._session_description_type(sdp=sdp, type="answer"))
 
-    async def close_session(self, session_id: str | None) -> None:
-        if session_id is None:
-            return
-        pc = self._peer_connections.pop(session_id, None)
-        player = self._players.pop(session_id, None)
+    async def close(self) -> None:
+        pc = self._peer_connection
+        player = self._player
+        self._peer_connection = None
+        self._player = None
         if player is not None and player.video is not None:
             player.video.stop()
         if pc is not None:
             await pc.close()
-
-    async def close_all(self) -> None:
-        peer_connections = list(self._peer_connections.values())
-        players = list(self._players.values())
-        self._peer_connections.clear()
-        self._players.clear()
-        for player in players:
-            if player.video is not None:
-                player.video.stop()
-        await asyncio.gather(*(pc.close() for pc in peer_connections), return_exceptions=True)
 
     def _prefer_h264(self, pc: Any) -> None:
         try:
@@ -143,15 +129,13 @@ def decode_pilot_input_snapshot(message: str | bytes) -> dict[str, Any]:
         raise ValueError("snapshot must be a JSON object")
     if payload.get("protocolVersion") != "ito.v1":
         raise ValueError("snapshot protocolVersion must be ito.v1")
-    if not isinstance(payload.get("sessionId"), str):
-        raise ValueError("snapshot requires sessionId")
     if not isinstance(payload.get("sequence"), int):
         raise ValueError("snapshot requires integer sequence")
     if not isinstance(payload.get("timestampMs"), (int, float)):
         raise ValueError("snapshot requires timestampMs")
     if not isinstance(payload.get("headsetYawRad"), (int, float)):
         raise ValueError("snapshot requires headsetYawRad")
-    if not isinstance(payload.get("controllers"), dict):
+    if not isinstance(payload.get("controllers"), list):
         raise ValueError("snapshot requires controllers")
     return payload
 

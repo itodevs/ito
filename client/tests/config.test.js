@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ClientSettingsStore, DEFAULT_SETTINGS, mergeSessionConfig, normalizeSettings } from "../src/config.js";
+import { ClientSettingsStore, DEFAULT_SETTINGS, mergeControlConfig, normalizeSettings } from "../src/config.js";
 
 class MemoryStorage {
   constructor() {
@@ -34,9 +34,9 @@ test("settings persist through local storage and clamp unsafe values", () => {
   assert.deepEqual(store.load(), saved);
 });
 
-test("session config merges server data channel profiles with local client settings", () => {
+test("control config merges Ito data channel profiles with local client settings", () => {
   const settings = normalizeSettings({ ...DEFAULT_SETTINGS, pilotInputRateHz: 30, splatBudget: 25 });
-  const merged = mergeSessionConfig(settings, { pilotInputDataChannel: { ordered: false } });
+  const merged = mergeControlConfig(settings, { pilotInputDataChannel: { ordered: false } });
 
   assert.equal(merged.pilotInputRateHz, 30);
   assert.equal(merged.splatBudget, 25);
